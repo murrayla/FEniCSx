@@ -11,6 +11,7 @@
 from mpi4py import MPI
 from dolfinx import mesh, fem, plot, io, default_scalar_type
 from dolfinx.fem.petsc import LinearProblem
+import ufl
 import numpy as np
 # += Parameters
 L = 1
@@ -34,7 +35,7 @@ def main():
     #   (2): array which contains the bottom left and top right of geometry for bounding
     #   (3): length, width, and height broken into number of elements
     #   (4): structure type
-    cube_mesh = mesh.create_box(
+    box_mesh = mesh.create_box(
         MPI.COMM_WORLD, 
         [
             np.array([0, 0, 0]), 
@@ -46,8 +47,8 @@ def main():
     # += Interpolation of mesh 
     #   (1): mesh to interpolate
     #   (2): type of interpolation i.e. (equation, order)
-    lagrange_vector_space_first_order = fem.FunctionSpace(
-        cube_mesh, 
+    lagrange_interpolation = fem.FunctionSpace(
+        box_mesh, 
         ("Lagrange", 1) 
     )
 
@@ -58,12 +59,29 @@ def main():
     #   (1): marker
     def clamped_boundary(x):
         return np.isclose(x[0], 0)
-    
-    dircichlet_clamped_boundary = fe.DirichletBC(
-        lagrange_vector_space_first_order,
-        fe.Constant((0.0, 0.0, 0.0)),
-        clamped_boundary
-    )
+    # += Face dimension
+    fdim = box_mesh.topology.dim - 1
+    # += Determine the relevant nodes
+    boundary_facets = mesh.locate_entities_boundary(box_mesh, fdim, clamped_boundary)
+    # += Set the conditions at the boundary
+    #   0s indicating a locted boundary
+    u_D = np.array([0, 0, 0], dtype=default_scalar_type)
+    # += Implement Dirichlet 
+    #   (1): values for condtition
+    #   (2): DOF identifier 
+    #       (1): interpolation scheme
+    #       (2): dimensions of DOFs relevant
+    #       (3): indices of the nodes that fit the requirement
+    #   (3): interpolation scheme
+    bc = fem.dirichletbc(u_D, fem.locate_dofs_topological(lagrange_interpolation, fdim, boundary_facets), lagrange_interpolation)
+    # += Traction
+    #   (1): mesh
+    #   (2): values for the force, here traction
+    traction = fem.Constant(box_mesh, default_scalar_type((0, 0, 0)))
+    # += Integration measure, here a boundary integratio, requires Unified Form Language
+    #   (1): required measurement, here defining surface
+    #   (2): geometry of interest
+    ds = ufl.Measure("ds", domain=box_mesh)
 
     
     # +==+==+ 
@@ -81,8 +99,8 @@ def main():
         )
         return cauchy_stress
     
-    u_trial = fe.TrialFunction(lagrange_vector_space_first_order)
-    v_test  = fe.TestFunction(lagrange_vector_space_first_order)
+    u_trial = fe.TrialFunction(lagrange_interpolation)
+    v_test  = fe.TestFunction(lagrange_interpolation)
     forcing = fe.Constant((0.0, 0.0, - DENSITY * ACCELERATION_DUE_TO_GRAVITY))
     traction = fe.Constant((0.0, 0.0, 0.0))
 
@@ -93,7 +111,7 @@ def main():
         fe.dot(traction, v_test) * fe.ds
     )
 
-    u_solution = fe.Function(lagrange_vector_space_first_order)
+    u_solution = fe.Function(lagrange_interpolation)
     fe.solve(
         weak_form_lhs == weak_form_rhs,
         u_solution,
@@ -107,7 +125,7 @@ def main():
     )
     von_Mises_stress = fe.sqrt(3/2 * fe.inner(deviatoric_stress_tensor, deviatoric_stress_tensor))
     lagrange_scalar_space_first_order = fe.FunctionSpace(
-        cube_mesh,
+        box_mesh,
         "Lagrange",
         1
     )
