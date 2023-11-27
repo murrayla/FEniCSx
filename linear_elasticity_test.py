@@ -31,7 +31,7 @@ def main():
     # +==+==+ 
     # Setup geometry for solution
     # += Setup generated mesh for problem
-    #   MPI.COMM_WORLD: allowing for the whole mesh to be treated as a unit for parallel processing
+    #   (1): allowing for the whole mesh to be treated as a unit for parallel processing
     #   (2): array which contains the bottom left and top right of geometry for bounding
     #   (3): length, width, and height broken into number of elements
     #   (4): structure type
@@ -47,7 +47,7 @@ def main():
     # += Interpolation of mesh 
     #   (1): mesh to interpolate
     #   (2): type of interpolation i.e. (equation, order)
-    lagrange_interpolation = fem.FunctionSpace(
+    lagrange_interpolation = fem.VectorFunctionSpace(
         box_mesh, 
         ("Lagrange", 1) 
     )
@@ -83,62 +83,47 @@ def main():
     #   (2): geometry of interest
     ds = ufl.Measure("ds", domain=box_mesh)
 
-    
     # +==+==+ 
     # Setup weak form for solving over domain
     # += Strain definition
     def epsilon(u):
-        engineering_Strain = 0.5 * (fem.nabla_grad(u) + fem.nabla_grad(u.T))
-        return engineering_Strain
-    
+        eng_strain = 0.5 * (ufl.nabla_grad(u) + ufl.nabla_grad(u).T)
+        return eng_strain
+    # += Stress definition
     def sigma(u):
-        cauchy_stress = (
-            LAME_LAMBDA * dfx.fem.tr(epsilon(u)) * dfx.fem.Identity(3)
-            + 
-            2 * LAME_MU * epsilon(u)
-        )
+        cauchy_stress = LAMBDA * ufl.nabla_div(u) * ufl.Identity(len(u)) + 2 * MU * epsilon(u)
         return cauchy_stress
-    
-    u_trial = fe.TrialFunction(lagrange_interpolation)
-    v_test  = fe.TestFunction(lagrange_interpolation)
-    forcing = fe.Constant((0.0, 0.0, - DENSITY * ACCELERATION_DUE_TO_GRAVITY))
-    traction = fe.Constant((0.0, 0.0, 0.0))
+    # += Trial functions for weak form
+    u = ufl.TrialFunction(lagrange_interpolation)
+    v = ufl.TestFunction(lagrange_interpolation)
+    # += Force term, volumetric gravity over non-bound side
+    f = fem.Constant(box_mesh, default_scalar_type((0, 0, -RHO * G)))
+    # += Setup of integral term for inner product of cauchy stress and derivative of displacement
+    lhs = ufl.inner(sigma(u), epsilon(v)) * ufl.dx
+    # += Setup of force term over volume and surface term of traction
+    rhs = ufl.dot(f, v) * ufl.dx + ufl.dot(traction, v) * ds
 
-    weak_form_lhs = fe.inner(sigma(u_trial), epsilon(v_test)) * fe.dx
-    weak_form_rhs = (
-        fe.dot(forcing, v_test) * fe.dx
-        +
-        fe.dot(traction, v_test) * fe.ds
-    )
+    # +==+==+ 
+    # Setup problem solver
+    # += Define problem parameters
+    problem = LinearProblem(lhs, rhs, bcs=[bc], petsc_options={"ksp_type": "preonly", "pc_type": "lu"})
+    # += Solve
+    uh = problem.solve()
 
-    u_solution = fe.Function(lagrange_interpolation)
-    fe.solve(
-        weak_form_lhs == weak_form_rhs,
-        u_solution,
-        dircichlet_clamped_boundary
-    )
+    # +==+==+
+    # ParaView export
+    with io.XDMFFile(box_mesh.comm, "deformation.xdmf", "w") as xdmf:
+        xdmf.write_mesh(box_mesh)
+        uh.name = "Deformation"
+        xdmf.write_function(uh)
 
-    deviatoric_stress_tensor = (
-        sigma(u_solution)
-        -
-        1/3 * fe.tr(sigma(u_solution)) * fe.Identity(3)
-    )
-    von_Mises_stress = fe.sqrt(3/2 * fe.inner(deviatoric_stress_tensor, deviatoric_stress_tensor))
-    lagrange_scalar_space_first_order = fe.FunctionSpace(
-        box_mesh,
-        "Lagrange",
-        1
-    )
-    von_Mises_stress = fe.project(von_Mises_stress, lagrange_scalar_space_first_order)
+    s = sigma(uh) - 1. / 3 * ufl.tr(sigma(uh)) * ufl.Identity(len(uh))
+    von_Mises = ufl.sqrt(3. / 2 * ufl.inner(s, s))  
 
-    u_solution.rename("Displacement Vector", "")
-    von_Mises_stress.rename("von Mises stress", "")
-
-    beam_deflection_file = fe.XDMFFile("beam_deflection.xdmf")
-    beam_deflection_file.parameters["flush_output"] = True
-    beam_deflection_file.parameters["functions_share_mesh"] = True
-    beam_deflection_file.write(u_solution, 0.0)
-    beam_deflection_file.write(von_Mises_stress, 0.0)
+    V_von_mises = fem.FunctionSpace(box_mesh, ("DG", 0))
+    stress_expr = fem.Expression(von_Mises, V_von_mises.element.interpolation_points())
+    stresses = fem.Function(V_von_mises)
+    stresses.interpolate(stress_expr)
 
 if __name__ == "__main__":
     main()
