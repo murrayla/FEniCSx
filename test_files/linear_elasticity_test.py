@@ -35,23 +35,17 @@ def main():
     #   (2): array which contains the bottom left and top right of geometry for bounding
     #   (3): length, width, and height broken into number of elements
     #   (4): structure type
-    box_mesh = mesh.create_box(
+    domain = mesh.create_box(
         MPI.COMM_WORLD, 
-        [
-            np.array([0, 0, 0]), 
-            np.array([L, W, W])
-        ],
+        [np.array([0, 0, 0]), np.array([L, W, W])],
         [20, 6, 6], 
-        cell_type=mesh.CellType.hexahedron
+        cell_type=mesh.CellType.tetrahedron
     )
     # += Interpolation of mesh 
     #   (1): mesh to interpolate
     #   (2): type of interpolation i.e. (equation, order)
-    lagrange_interpolation = fem.VectorFunctionSpace(
-        box_mesh, 
-        ("Lagrange", 1) 
-    )
-
+    V = fem.VectorFunctionSpace(domain, ("Lagrange", 2))            
+    
     # +==+==+ 
     # Setup boundary conditions for cantilever under gravity
     # += Function for identifying the correct nodes
@@ -60,9 +54,9 @@ def main():
     def clamped_boundary(x):
         return np.isclose(x[0], 0)
     # += Face dimension
-    fdim = box_mesh.topology.dim - 1
+    fdim = domain.topology.dim - 1
     # += Determine the relevant nodes
-    boundary_facets = mesh.locate_entities_boundary(box_mesh, fdim, clamped_boundary)
+    boundary_facets = mesh.locate_entities_boundary(domain, fdim, clamped_boundary)
     # += Set the conditions at the boundary
     #   0s indicating a locted boundary
     u_D = np.array([0, 0, 0], dtype=default_scalar_type)
@@ -73,15 +67,15 @@ def main():
     #       (2): dimensions of DOFs relevant
     #       (3): indices of the nodes that fit the requirement
     #   (3): interpolation scheme
-    bc = fem.dirichletbc(u_D, fem.locate_dofs_topological(lagrange_interpolation, fdim, boundary_facets), lagrange_interpolation)
+    bc = fem.dirichletbc(u_D, fem.locate_dofs_topological(V, fdim, boundary_facets), V)
     # += Traction
     #   (1): mesh
     #   (2): values for the force, here traction
-    traction = fem.Constant(box_mesh, default_scalar_type((0, 0, 0)))
+    traction = fem.Constant(domain, default_scalar_type((0, 0, 0)))
     # += Integration measure, here a boundary integratio, requires Unified Form Language
     #   (1): required measurement, here defining surface
     #   (2): geometry of interest
-    ds = ufl.Measure("ds", domain=box_mesh)
+    ds = ufl.Measure("ds", domain=domain)
 
     # +==+==+ 
     # Setup weak form for solving over domain
@@ -94,10 +88,10 @@ def main():
         cauchy_stress = LAMBDA * ufl.nabla_div(u) * ufl.Identity(len(u)) + 2 * MU * epsilon(u)
         return cauchy_stress
     # += Trial functions for weak form
-    u = ufl.TrialFunction(lagrange_interpolation)
-    v = ufl.TestFunction(lagrange_interpolation)
+    u = ufl.TrialFunction(V)
+    v = ufl.TestFunction(V)
     # += Force term, volumetric gravity over non-bound side
-    f = fem.Constant(box_mesh, default_scalar_type((0, 0, -RHO * G)))
+    f = fem.Constant(domain, default_scalar_type((0, 0, -RHO * G)))
     # += Setup of integral term for inner product of cauchy stress and derivative of displacement
     lhs = ufl.inner(sigma(u), epsilon(v)) * ufl.dx
     # += Setup of force term over volume and surface term of traction
@@ -112,15 +106,15 @@ def main():
 
     # +==+==+
     # ParaView export
-    with io.XDMFFile(box_mesh.comm, "deformation.xdmf", "w") as xdmf:
-        xdmf.write_mesh(box_mesh)
+    with io.XDMFFile(domain.comm, "deformation.xdmf", "w") as xdmf:
+        xdmf.write_mesh(domain)
         uh.name = "Deformation"
         xdmf.write_function(uh)
 
     s = sigma(uh) - 1. / 3 * ufl.tr(sigma(uh)) * ufl.Identity(len(uh))
     von_Mises = ufl.sqrt(3. / 2 * ufl.inner(s, s))  
 
-    V_von_mises = fem.FunctionSpace(box_mesh, ("DG", 0))
+    V_von_mises = fem.FunctionSpace(domain, ("DG", 0))
     stress_expr = fem.Expression(von_Mises, V_von_mises.element.interpolation_points())
     stresses = fem.Function(V_von_mises)
     stresses.interpolate(stress_expr)
