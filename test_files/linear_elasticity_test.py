@@ -46,25 +46,26 @@ def create_gmsh_structure():
     thruVolume = gmsh.model.occ.addThruSections([baseCircle, midCircle, topCircle], tag=1)
     gmsh.model.occ.synchronize()
     volumes = gmsh.model.getEntities(dim=3)
-    gmsh.model.addPhysicalGroup(volumes[0][0], [volumes[0][1]], tag=1)
+    gmsh.model.addPhysicalGroup(volumes[0][0], [volumes[0][1]], tag=2)
     gmsh.model.setPhysicalName(volumes[0][0], 1, "Obj Vol")
-    base, wall, top = 2, 3, 4
+    base, wall, top = 3, 4, 5
     base_surf, wall_surf,top_surf = [], [], []
     boundaries = gmsh.model.getBoundary(volumes, oriented=False)
+    print(volumes, boundaries)
     for boundary in boundaries:
         center_of_mass = gmsh.model.occ.getCenterOfMass(boundary[0], boundary[1])
         if np.allclose(center_of_mass, [0, 0, 0]):
             base_surf.append(boundary[1])
-        elif np.allclose(center_of_mass, [0, 0, 1]):
+        elif np.allclose(center_of_mass, [0, 0, 0.9166666663886719]):
             wall_surf.append(boundary[1])
         elif np.allclose(center_of_mass, [0, 0, 2]):
             top_surf.append(boundary[1])
-    gmsh.model.addPhysicalGroup(1, wall_surf, wall)
-    gmsh.model.setPhysicalName(1, wall, "Cylinder Surface")
-    gmsh.model.addPhysicalGroup(1, base_surf, base)
-    gmsh.model.setPhysicalName(1, base, "Base")
-    gmsh.model.addPhysicalGroup(1, top_surf, top)
-    gmsh.model.setPhysicalName(1, top, "Top")
+    gmsh.model.addPhysicalGroup(2, wall_surf, wall)
+    gmsh.model.setPhysicalName(2, wall, "Cylinder Surface")
+    gmsh.model.addPhysicalGroup(2, base_surf, base)
+    gmsh.model.setPhysicalName(2, base, "Base")
+    gmsh.model.addPhysicalGroup(2, top_surf, top)
+    gmsh.model.setPhysicalName(2, top, "Top")
     gmsh.model.mesh.generate(3)
     gmsh.model.mesh.refine()
     gmsh.model.mesh.setOrder(2)
@@ -83,12 +84,25 @@ def create_mesh(mesh, cell_type, prune_z=False):
 # Main Function for running computation
 # +==+==+==+
 def main():
-    create_gmsh_structure()
-    gmsh_mesh, cell_markers, facet_markers = io.gmshio.read_from_msh("testCylinder.msh", MPI.COMM_WORLD, gdim=3)
-    print("It Loaded?")
+    # create_gmsh_structure()
+    # gmsh_mesh, cell_markers, facet_markers = io.gmshio.read_from_msh("testCylinder.msh", MPI.COMM_WORLD, gdim=3)
     # gmsh_mesh = meshio.read("gmsh_files/myo_SEM0.msh")
     # tetra_mesh = create_mesh(gmsh_mesh, "tetrahedron10", False)
     # meshio.write("mesh.xdmf", tetra_mesh)
+    # msh = meshio.read("testCylinder.msh")
+
+    # # Create and save one file for the mesh, and one file for the facets 
+    # triangle_mesh = create_mesh(msh, "tetra10", prune_z=False)
+
+    # # Is it possible...?
+    # # quad_mesh = create_mesh(msh, "quadrangle", prune_z=True)
+    # # hex_mesh = create_mesh(msh, "hexahedral", prune_z=True)
+    # meshio.write("t13.xdmf", triangle_mesh)
+
+    with io.XDMFFile(MPI.COMM_WORLD, "t13.xdmf", "r") as xdmf:
+        domain = xdmf.read_mesh(name="Grid")
+        # ct = xdmf.read_meshtags(mesh, name="Grid")
+    # domain.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
     # +==+==+ 
     # Setup geometry for solution
     # += Setup generated mesh for problem
@@ -96,12 +110,12 @@ def main():
     #   (2): array which contains the bottom left and top right of geometry for bounding
     #   (3): length, width, and height broken into number of elements
     #   (4): structure type
-    domain = mesh.create_box(
-        MPI.COMM_WORLD, 
-        [np.array([0, 0, 0]), np.array([L, W, W])],
-        [20, 6, 6], 
-        cell_type=mesh.CellType.tetrahedron
-    )
+    # domain = mesh.create_box(
+    #     MPI.COMM_WORLD, 
+    #     [np.array([0, 0, 0]), np.array([L, W, W])],
+    #     [20, 6, 6], 
+    #     cell_type=mesh.CellType.tetrahedron
+    # )
     # += Interpolation of mesh 
     #   (1): mesh to interpolate
     #   (2): type of interpolation i.e. (equation, order)
@@ -115,8 +129,8 @@ def main():
     # += Function for identifying the correct nodes
     #   Setup here for a boundary condition at 0
     #   (1): marker
-    def clamped_boundary(x):
-        return np.isclose(x[0], 0)
+    def clamped_boundary(z):
+        return np.isclose(z[0], 0)
     # += Face dimension
     fdim = domain.topology.dim - 1
     # += Determine the relevant nodes
@@ -155,7 +169,8 @@ def main():
     u = ufl.TrialFunction(V)
     v = ufl.TestFunction(V)
     # += Force term, volumetric gravity over non-bound side
-    f = fem.Constant(domain, default_scalar_type((0, 0, -RHO * G)))
+    # f = fem.Constant(domain, default_scalar_type((-RHO * G, 0, 0)))
+    f = fem.Constant(domain, default_scalar_type((0, 0, 0)))
     # += Setup of integral term for inner product of cauchy stress and derivative of displacement
     lhs = ufl.inner(sigma(u), epsilon(v)) * ufl.dx
     # += Setup of force term over volume and surface term of traction
