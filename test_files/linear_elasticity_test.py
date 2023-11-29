@@ -13,6 +13,9 @@ from dolfinx import mesh, fem, plot, io, default_scalar_type
 from dolfinx.fem.petsc import LinearProblem
 import ufl
 import numpy as np
+import meshio
+import gmsh
+
 # += Parameters
 L = 1
 W = 0.2
@@ -24,10 +27,68 @@ BETA = 1.25
 LAMBDA = BETA
 G = GAMMA
 
+def create_gmsh_structure():
+    gmsh.initialize()
+    gmsh.model.add("testCylinder")
+    # += Setup base of cylinder
+    baseCircle = gmsh.model.occ.addCircle(x=0, y=0, z=0, r=0.5, tag=1)
+    baseCircleCurve = gmsh.model.occ.addCurveLoop([baseCircle], 1)
+    gmsh.model.occ.synchronize()
+    # += Setup middle of cylinder
+    midCircle = gmsh.model.occ.addCircle(x=0, y=0, z=1, r=0.4, tag=2)
+    midCircleCurve = gmsh.model.occ.addCurveLoop([midCircle], 2)
+    gmsh.model.occ.synchronize()
+    # += Setup top of cylinder
+    topCircle = gmsh.model.occ.addCircle(x=0, y=0, z=2, r=0.3, tag=3)
+    topCircleCurve = gmsh.model.occ.addCurveLoop([topCircle], 3)
+    gmsh.model.occ.synchronize()
+    # += Setup wire between circles
+    thruVolume = gmsh.model.occ.addThruSections([baseCircle, midCircle, topCircle], tag=1)
+    gmsh.model.occ.synchronize()
+    volumes = gmsh.model.getEntities(dim=3)
+    gmsh.model.addPhysicalGroup(volumes[0][0], [volumes[0][1]], tag=1)
+    gmsh.model.setPhysicalName(volumes[0][0], 1, "Obj Vol")
+    base, wall, top = 2, 3, 4
+    base_surf, wall_surf,top_surf = [], [], []
+    boundaries = gmsh.model.getBoundary(volumes, oriented=False)
+    for boundary in boundaries:
+        center_of_mass = gmsh.model.occ.getCenterOfMass(boundary[0], boundary[1])
+        if np.allclose(center_of_mass, [0, 0, 0]):
+            base_surf.append(boundary[1])
+        elif np.allclose(center_of_mass, [0, 0, 1]):
+            wall_surf.append(boundary[1])
+        elif np.allclose(center_of_mass, [0, 0, 2]):
+            top_surf.append(boundary[1])
+    gmsh.model.addPhysicalGroup(1, wall_surf, wall)
+    gmsh.model.setPhysicalName(1, wall, "Cylinder Surface")
+    gmsh.model.addPhysicalGroup(1, base_surf, base)
+    gmsh.model.setPhysicalName(1, base, "Base")
+    gmsh.model.addPhysicalGroup(1, top_surf, top)
+    gmsh.model.setPhysicalName(1, top, "Top")
+    gmsh.model.mesh.generate(3)
+    gmsh.model.mesh.refine()
+    gmsh.model.mesh.setOrder(2)
+    gmsh.write("testCylinder.msh")
+    gmsh.finalize()
+
+def create_mesh(mesh, cell_type, prune_z=False):
+    cells = mesh.get_cells_type(cell_type)
+    cell_data = mesh.get_cell_data("gmsh:physical", cell_type)
+    out_mesh = meshio.Mesh(points=mesh.points, cells={cell_type: cells}, cell_data={"name_to_read":[cell_data]})
+    if prune_z:
+        out_mesh.prune_z_0()
+    return out_mesh
+
 # +==+==+==+
 # Main Function for running computation
 # +==+==+==+
 def main():
+    create_gmsh_structure()
+    gmsh_mesh, cell_markers, facet_markers = io.gmshio.read_from_msh("testCylinder.msh", MPI.COMM_WORLD, gdim=3)
+    print("It Loaded?")
+    # gmsh_mesh = meshio.read("gmsh_files/myo_SEM0.msh")
+    # tetra_mesh = create_mesh(gmsh_mesh, "tetrahedron10", False)
+    # meshio.write("mesh.xdmf", tetra_mesh)
     # +==+==+ 
     # Setup geometry for solution
     # += Setup generated mesh for problem
