@@ -44,7 +44,10 @@ def main():
     # += Interpolation of mesh 
     #   (1): mesh to interpolate
     #   (2): type of interpolation i.e. (equation, order)
-    V = fem.VectorFunctionSpace(domain, ("Lagrange", 2))            
+    # V = fem.FunctionSpace(domain, ("CG", 2))      
+    vV = ufl.VectorElement("Lagrange", domain.ufl_cell(), degree=2)  
+    # vu = fem.Function(V, name="u")
+    V = fem.FunctionSpace(domain, vV)    
     
     # +==+==+ 
     # Setup boundary conditions for cantilever under gravity
@@ -106,10 +109,12 @@ def main():
 
     # +==+==+
     # ParaView export
-    with io.XDMFFile(domain.comm, "deformation.xdmf", "w") as xdmf:
-        xdmf.write_mesh(domain)
-        uh.name = "Deformation"
-        xdmf.write_function(uh)
+    # with io.XDMFFile(domain.comm, "deformation.xdmf", "w") as xdmf:
+    #     xdmf.write_mesh(domain)
+    #     uh.name = "Deformation"
+    #     xdmf.write_function(uh)
+    with io.VTXWriter(MPI.COMM_WORLD, "deformation.bp", [uh], engine="BP4") as vtx:
+        vtx.write(0.0)
 
     s = sigma(uh) - 1. / 3 * ufl.tr(sigma(uh)) * ufl.Identity(len(uh))
     von_Mises = ufl.sqrt(3. / 2 * ufl.inner(s, s))  
