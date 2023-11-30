@@ -1,57 +1,75 @@
-# FEniCSx Cantilever Test
+# +==+===+==+==+==+
+# Author: Liam Murray
+# Contact: murrayla@student.unimelb.edu.au
+# Date: 01/12/2023
+# +==+===+==+==+==+
 
 # +==+===+==+==+
 # Linear elasticity
-# Left hand of beam will be clamped with homgenous Dirchlet boundary conditions
+#   Testing beam structures under cantilever deformation
 # +==+===+==+==+
 
 # +==+==+==+
 # Setup
 # += Imports
-from mpi4py import MPI
 from dolfinx import mesh, fem, plot, io, default_scalar_type
 from dolfinx.fem.petsc import LinearProblem
-import ufl
+from mpi4py import MPI
 import numpy as np
 import meshio
 import gmsh
-
+import ufl
 # += Parameters
+# Test type
+TEST_CASE = 0
+# Geometry
 L = 1
 W = 0.2
+MESH_DIM = 3
+FACE_DIM = 2
+# Material
+LAMBDA = 1.25
 MU = 1
+# Problem
 RHO = 1
-DELTA = W / L
-GAMMA = 0.4 * DELTA**2
-BETA = 1.25
-LAMBDA = BETA
-G = GAMMA
 
-def create_gmsh_structure():
+def create_mesh(msh, cell_type, prune_z=False):
+    cells = msh.get_cells_type(cell_type)
+    cell_data = msh.get_cell_data("gmsh:physical", cell_type)
+    out_mesh = meshio.Mesh(points=msh.points, cells={cell_type: cells}, cell_data={"name_to_read":[cell_data]})
+    if prune_z:
+        out_mesh.prune_z_0()
+    return out_mesh
+
+# +==+==+==+
+# Gmsh Function for constructing simple converging cone mesh
+#   testing functionality of physical groups to understand loading into 
+#   FEniCSx
+# +==+==+==+
+def create_gmsh_cone():
+    # +==+==+
+    # Initialise and begin geometry
     gmsh.initialize()
-    gmsh.model.add("testCylinder")
+    gmsh.model.add("testCone")
     # += Setup base of cylinder
     baseCircle = gmsh.model.occ.addCircle(x=0, y=0, z=0, r=0.5, tag=1)
     baseCircleCurve = gmsh.model.occ.addCurveLoop([baseCircle], 1)
-    gmsh.model.occ.synchronize()
     # += Setup middle of cylinder
-    midCircle = gmsh.model.occ.addCircle(x=0, y=0, z=1, r=0.4, tag=2)
+    midCircle = gmsh.model.occ.addCircle(x=0.1, y=0.05, z=1, r=0.1, tag=2)
     midCircleCurve = gmsh.model.occ.addCurveLoop([midCircle], 2)
-    gmsh.model.occ.synchronize()
     # += Setup top of cylinder
-    topCircle = gmsh.model.occ.addCircle(x=0, y=0, z=2, r=0.3, tag=3)
+    topCircle = gmsh.model.occ.addCircle(x=-0.1, y=-0.1, z=2, r=0.3, tag=3)
     topCircleCurve = gmsh.model.occ.addCurveLoop([topCircle], 3)
-    gmsh.model.occ.synchronize()
-    # += Setup wire between circles
+    gmsh.model.occ.addCircle(-0.1, -0.1, 2, 0.3, 3)
+    # += Setup volume by extruding through sections and syunchronize
     thruVolume = gmsh.model.occ.addThruSections([baseCircle, midCircle, topCircle], tag=1)
     gmsh.model.occ.synchronize()
     volumes = gmsh.model.getEntities(dim=3)
-    gmsh.model.addPhysicalGroup(volumes[0][0], [volumes[0][1]], tag=2)
-    gmsh.model.setPhysicalName(volumes[0][0], 1, "Obj Vol")
-    base, wall, top = 3, 4, 5
-    base_surf, wall_surf,top_surf = [], [], []
-    boundaries = gmsh.model.getBoundary(volumes, oriented=False)
-    print(volumes, boundaries)
+    # += Create Physical Group on volume
+    physicalVolume = gmsh.model.addPhysicalGroup(dim=3, tags=[1], tag=2, name="Volume")
+    # += Setup boundary surfaces
+    base_surf, wall_surf, top_surf = [], [], []
+    boundaries = gmsh.model.getBoundary(dimTags=volumes, oriented=False)
     for boundary in boundaries:
         center_of_mass = gmsh.model.occ.getCenterOfMass(boundary[0], boundary[1])
         if np.allclose(center_of_mass, [0, 0, 0]):
@@ -60,145 +78,170 @@ def create_gmsh_structure():
             wall_surf.append(boundary[1])
         elif np.allclose(center_of_mass, [0, 0, 2]):
             top_surf.append(boundary[1])
-    gmsh.model.addPhysicalGroup(2, wall_surf, wall)
-    gmsh.model.setPhysicalName(2, wall, "Cylinder Surface")
-    gmsh.model.addPhysicalGroup(2, base_surf, base)
-    gmsh.model.setPhysicalName(2, base, "Base")
-    gmsh.model.addPhysicalGroup(2, top_surf, top)
-    gmsh.model.setPhysicalName(2, top, "Top")
+    physicalCylinderSurface = gmsh.model.addPhysicalGroup(dim=2, tags=wall_surf, tag=2, name="Cylinder Surface")
+    physicalBaseSurface = gmsh.model.addPhysicalGroup(dim=2, tags=base_surf, tag=3, name="Base")
+    PhysicalTopSurface = gmsh.model.addPhysicalGroup(dim=2, tags=top_surf, tag=4, name="Top")
+    # += Create Mesh
     gmsh.model.mesh.generate(3)
     gmsh.model.mesh.refine()
     gmsh.model.mesh.setOrder(2)
-    gmsh.write("testCylinder.msh")
+    # += Write File
+    gmsh.write("testCone.msh")
     gmsh.finalize()
 
-def create_mesh(mesh, cell_type, prune_z=False):
-    cells = mesh.get_cells_type(cell_type)
-    cell_data = mesh.get_cell_data("gmsh:physical", cell_type)
-    out_mesh = meshio.Mesh(points=mesh.points, cells={cell_type: cells}, cell_data={"name_to_read":[cell_data]})
-    if prune_z:
-        out_mesh.prune_z_0()
-    return out_mesh
+def create_gmsh_cylinder():
+    # +==+==+
+    # Initialise and begin geometry
+    gmsh.initialize()
+    gmsh.model.add("testCylinder")
+    # += Setup base of cylinder, surface
+    baseCircle = gmsh.model.occ.addCircle(x=0, y=0, z=0, r=0.5, tag=1)
+    baseCircleCurve = gmsh.model.occ.addCurveLoop([baseCircle], 1)
+    baseCircleSurface = gmsh.model.occ.addPlaneSurface(wireTags=[baseCircle], tag=1)
+    # += Synchronize and add physical group
+    gmsh.model.addPhysicalGroup(dim=2, tags=[baseCircleSurface], tag=100, name="lower_surface")
+    gmsh.model.occ.synchronize()
+    # += Extrude from geometry
+    extrusion = gmsh.model.occ.extrude(dimTags=[(2, baseCircleSurface)], dx=0, dy=0, dz=4)
+    gmsh.model.occ.synchronize()
+    # += Create Physical Group on volume
+    volume = gmsh.model.addPhysicalGroup(3, [extrusion[1][1]], name="volume")
+    lateral_surf_group = gmsh.model.addPhysicalGroup(2, [extrusion[2][1]], tag = 101, name="lateral_surface")
+    upper_surf_group = gmsh.model.addPhysicalGroup(2, [extrusion[0][1]], tag = 102, name="upper_surface")
+    # += Create Mesh
+    gmsh.model.mesh.generate(3)
+    gmsh.model.mesh.refine()
+    gmsh.model.mesh.setOrder(2)
+    # += Write File
+    gmsh.write("testCylinder.msh")
+    gmsh.finalize()
 
 # +==+==+==+
 # Main Function for running computation
 # +==+==+==+
 def main():
-    # create_gmsh_structure()
-    # gmsh_mesh, cell_markers, facet_markers = io.gmshio.read_from_msh("testCylinder.msh", MPI.COMM_WORLD, gdim=3)
-    # gmsh_mesh = meshio.read("gmsh_files/myo_SEM0.msh")
-    # tetra_mesh = create_mesh(gmsh_mesh, "tetrahedron10", False)
-    # meshio.write("mesh.xdmf", tetra_mesh)
-    # msh = meshio.read("testCylinder.msh")
+    # +==+==+
+    # Allocate meshes and load them for analysis
+    # += Simple Cylinder
+    if TEST_CASE == 0:
+        # += Create mesh
+        create_gmsh_cylinder()
+        # += Read .msh into domain for FEniCSx
+        #    (1): File name .msh
+        #    (2): Multiprocessing assignment
+        #    (3): Rank of multiprocessing
+        #    (4): Dimension of mesh
+        domain, _, ft = io.gmshio.read_from_msh("testCylinder.msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
+        ft.name = "Facet markers"
+    # += Cone shape
+    if TEST_CASE == 1:
+        # += Create mesh
+        create_gmsh_cone()
+        # += Read .msh into domain for FEniCSx
+        #    (1): File name .msh
+        #    (2): Multiprocessing assignment
+        #    (3): Rank of multiprocessing
+        #    (4): Dimension of mesh
+        domain, _, ft = io.gmshio.read_from_msh("testCone.msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
+        ft.name = "Facet markers"
 
-    # # Create and save one file for the mesh, and one file for the facets 
-    # triangle_mesh = create_mesh(msh, "tetra10", prune_z=False)
-
-    # # Is it possible...?
-    # # quad_mesh = create_mesh(msh, "quadrangle", prune_z=True)
-    # # hex_mesh = create_mesh(msh, "hexahedral", prune_z=True)
-    # meshio.write("t13.xdmf", triangle_mesh)
-
-    with io.XDMFFile(MPI.COMM_WORLD, "t13.xdmf", "r") as xdmf:
-        domain = xdmf.read_mesh(name="Grid")
-        # ct = xdmf.read_meshtags(mesh, name="Grid")
-    # domain.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
-    # +==+==+ 
-    # Setup geometry for solution
-    # += Setup generated mesh for problem
-    #   (1): allowing for the whole mesh to be treated as a unit for parallel processing
-    #   (2): array which contains the bottom left and top right of geometry for bounding
-    #   (3): length, width, and height broken into number of elements
-    #   (4): structure type
-    # domain = mesh.create_box(
-    #     MPI.COMM_WORLD, 
-    #     [np.array([0, 0, 0]), np.array([L, W, W])],
-    #     [20, 6, 6], 
-    #     cell_type=mesh.CellType.tetrahedron
-    # )
-    # += Interpolation of mesh 
-    #   (1): mesh to interpolate
-    #   (2): type of interpolation i.e. (equation, order)
-    # V = fem.FunctionSpace(domain, ("CG", 2))      
-    vV = ufl.VectorElement("Lagrange", domain.ufl_cell(), degree=2)  
-    # vu = fem.Function(V, name="u")
-    V = fem.FunctionSpace(domain, vV)    
+    # +==+==+
+    # Interpolation of mesh 
+    # += Create Vector Element
+    #    (1): Interpolation style
+    #    (2): Cell from mesh domain
+    #    (3): Degree of interpolation style
+    fe_interpolation = ufl.VectorElement("Lagrange", domain.ufl_cell(), degree=2)  
+    # += Create Function Space
+    #    (1): Mesh domain space
+    #    (2): Finite element setup
+    V = fem.FunctionSpace(domain, fe_interpolation)    
     
     # +==+==+ 
     # Setup boundary conditions for cantilever under gravity
     # += Function for identifying the correct nodes
-    #   Setup here for a boundary condition at 0
-    #   (1): marker
-    def clamped_boundary(z):
-        return np.isclose(z[0], 0)
-    # += Face dimension
-    fdim = domain.topology.dim - 1
+    #    Setup here for a boundary condition at 0
+    #    (1): marker
+    def clamped_boundary(x):
+        # += Test what coordinate of the marker is close to desired value
+        #    (1): Coordinate value {2 here for Z position}
+        #    (2): Desired boundary value
+        return np.isclose(x[2], 0)
     # += Determine the relevant nodes
-    boundary_facets = mesh.locate_entities_boundary(domain, fdim, clamped_boundary)
+    #    (1): Domain of nodes
+    #    (2): Dimension of face
+    #    (3): Marker for facets
+    boundary_facets = mesh.locate_entities_boundary(mesh=domain, dim=FACE_DIM, marker=clamped_boundary)
     # += Set the conditions at the boundary
-    #   0s indicating a locted boundary
+    #    0s indicating a locked boundary
     u_D = np.array([0, 0, 0], dtype=default_scalar_type)
     # += Implement Dirichlet 
-    #   (1): values for condtition
-    #   (2): DOF identifier 
-    #       (1): interpolation scheme
-    #       (2): dimensions of DOFs relevant
-    #       (3): indices of the nodes that fit the requirement
-    #   (3): interpolation scheme
-    bc = fem.dirichletbc(u_D, fem.locate_dofs_topological(V, fdim, boundary_facets), V)
+    #    (1): Values for condtition
+    #    (2): DOF identifier 
+    #         (1): Interpolation scheme
+    #         (2): Dimensions of DOFs relevant
+    #         (3): Indices of the nodes that fit the requirement
+    #    (3): Interpolation scheme
+    bc = fem.dirichletbc(u_D, fem.locate_dofs_topological(V, FACE_DIM, boundary_facets), V)
     # += Traction
-    #   (1): mesh
-    #   (2): values for the force, here traction
+    #    (1): Mesh
+    #    (2): Values for the force, here traction
     traction = fem.Constant(domain, default_scalar_type((0, 0, 0)))
     # += Integration measure, here a boundary integratio, requires Unified Form Language
-    #   (1): required measurement, here defining surface
-    #   (2): geometry of interest
+    #    (1): Required measurement, here defining surface
+    #    (2): Geometry of interest
     ds = ufl.Measure("ds", domain=domain)
 
     # +==+==+ 
     # Setup weak form for solving over domain
     # += Strain definition
     def epsilon(u):
+        # ε = 0.5 * (∇u + ∇u.T)
         eng_strain = 0.5 * (ufl.nabla_grad(u) + ufl.nabla_grad(u).T)
         return eng_strain
     # += Stress definition
     def sigma(u):
+        # σ = λ * ∇u * I + 2 * μ * ε
         cauchy_stress = LAMBDA * ufl.nabla_div(u) * ufl.Identity(len(u)) + 2 * MU * epsilon(u)
         return cauchy_stress
-    # += Trial functions for weak form
+    # += Trial and Test functions for weak form
+    #    (1): Finite Element interpolation
     u = ufl.TrialFunction(V)
     v = ufl.TestFunction(V)
     # += Force term, volumetric gravity over non-bound side
-    # f = fem.Constant(domain, default_scalar_type((-RHO * G, 0, 0)))
-    f = fem.Constant(domain, default_scalar_type((0, 0, 0)))
+    #    (1): Mesh domain
+    #    (2): Force terms in (x, y, z)
+    #         Here using -RHO * K where K is a scaled version of gravity for the geometry
+    f = fem.Constant(domain, default_scalar_type((-RHO * 0.01, 0, 0)))
     # += Setup of integral term for inner product of cauchy stress and derivative of displacement
-    lhs = ufl.inner(sigma(u), epsilon(v)) * ufl.dx
+    variational_bilinear = ufl.inner(sigma(u), epsilon(v)) * ufl.dx
     # += Setup of force term over volume and surface term of traction
-    rhs = ufl.dot(f, v) * ufl.dx + ufl.dot(traction, v) * ds
+    variational_linear = ufl.dot(f, v) * ufl.dx + ufl.dot(traction, v) * ds
 
     # +==+==+ 
     # Setup problem solver
     # += Define problem parameters
-    problem = LinearProblem(lhs, rhs, bcs=[bc], petsc_options={"ksp_type": "preonly", "pc_type": "lu"})
+    #    (1): Bilinear (LHS) term
+    #    (2): Linear (RHS) term
+    #    (3): Boundary Conditions
+    #    (4): Linear Solver parameters:
+    #         (1): KSP_TYPE, Krylov solver (iteractive method) - here just preconditioning
+    #         (2): PC_TYPE - LU Decomposition
+    problem = LinearProblem(
+        variational_bilinear, 
+        variational_linear, 
+        bcs=[bc], 
+        petsc_options={
+            "ksp_type": "preonly", "pc_type": "lu"
+        }
+    )
     # += Solve
     uh = problem.solve()
 
     # +==+==+
     # ParaView export
-    # with io.XDMFFile(domain.comm, "deformation.xdmf", "w") as xdmf:
-    #     xdmf.write_mesh(domain)
-    #     uh.name = "Deformation"
-    #     xdmf.write_function(uh)
     with io.VTXWriter(MPI.COMM_WORLD, "deformation.bp", [uh], engine="BP4") as vtx:
         vtx.write(0.0)
-
-    s = sigma(uh) - 1. / 3 * ufl.tr(sigma(uh)) * ufl.Identity(len(uh))
-    von_Mises = ufl.sqrt(3. / 2 * ufl.inner(s, s))  
-
-    V_von_mises = fem.FunctionSpace(domain, ("DG", 0))
-    stress_expr = fem.Expression(von_Mises, V_von_mises.element.interpolation_points())
-    stresses = fem.Function(V_von_mises)
-    stresses.interpolate(stress_expr)
 
 if __name__ == "__main__":
     main()
