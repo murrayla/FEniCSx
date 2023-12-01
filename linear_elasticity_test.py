@@ -21,7 +21,7 @@ import gmsh
 import ufl
 # += Parameters
 # Test type
-TEST_CASE = 0
+TEST_CASE = 1
 # Geometry
 L = 1
 W = 0.2
@@ -60,7 +60,6 @@ def create_gmsh_cone():
     # += Setup top of cylinder
     topCircle = gmsh.model.occ.addCircle(x=-0.1, y=-0.1, z=2, r=0.3, tag=3)
     topCircleCurve = gmsh.model.occ.addCurveLoop([topCircle], 3)
-    gmsh.model.occ.addCircle(-0.1, -0.1, 2, 0.3, 3)
     # += Setup volume by extruding through sections and syunchronize
     thruVolume = gmsh.model.occ.addThruSections([baseCircle, midCircle, topCircle], tag=1)
     gmsh.model.occ.synchronize()
@@ -86,7 +85,7 @@ def create_gmsh_cone():
     gmsh.model.mesh.refine()
     gmsh.model.mesh.setOrder(2)
     # += Write File
-    gmsh.write("testCone.msh")
+    gmsh.write("gmsh_msh/testCone.msh")
     gmsh.finalize()
 
 def create_gmsh_cylinder():
@@ -113,7 +112,7 @@ def create_gmsh_cylinder():
     gmsh.model.mesh.refine()
     gmsh.model.mesh.setOrder(2)
     # += Write File
-    gmsh.write("testCylinder.msh")
+    gmsh.write("gmsh_msh/testCylinder.msh")
     gmsh.finalize()
 
 # +==+==+==+
@@ -131,7 +130,7 @@ def main():
         #    (2): Multiprocessing assignment
         #    (3): Rank of multiprocessing
         #    (4): Dimension of mesh
-        domain, _, ft = io.gmshio.read_from_msh("testCylinder.msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
+        domain, _, ft = io.gmshio.read_from_msh("gmsh_msh/testCylinder.msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
         ft.name = "Facet markers"
     # += Cone shape
     if TEST_CASE == 1:
@@ -142,7 +141,7 @@ def main():
         #    (2): Multiprocessing assignment
         #    (3): Rank of multiprocessing
         #    (4): Dimension of mesh
-        domain, _, ft = io.gmshio.read_from_msh("testCone.msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
+        domain, _, ft = io.gmshio.read_from_msh("gmsh_msh/testCone.msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
         ft.name = "Facet markers"
 
     # +==+==+
