@@ -102,12 +102,12 @@ def main(test_name, test_type, test_order, refine_check):
     #    (1): Interpolation style
     #    (2): Cell from mesh domain
     #    (3): Degree of interpolation style
-    V = ufl.VectorElement("Lagrange", domain.ufl_cell(), degree=MESH_DIM-1)  
+    element = ufl.VectorElement("Lagrange", domain.ufl_cell(), degree=MESH_DIM-1)  
     # += Create Function Space
     #    (1): Mesh domain space
     #    (2): Finite element setup
     # += Geometry Space
-    func_space = fem.FunctionSpace(domain, V)
+    V = fem.FunctionSpace(domain, element)
 
     # +==+==+
     # Determine Boundaries
@@ -138,37 +138,33 @@ def main(test_name, test_type, test_order, refine_check):
 
     # +==+==+
     # Boundary Conditions
-    # += Base Dirichlet BCs
+    # += Base Dirichlet BCs but broken per subspace
     #    (1): Interpolation space
     #    (2): Internal function to determine if on z = 0
-    base_dofs =  fem.locate_dofs_topological(func_space, facet_tag.dim, facet_tag.find(1))
-    # += Set values at the base boundary
-    u_base = fem.Function(func_space)
-    u_base.interpolate(lambda x: 0)
+    # base_dofs_x = fem.locate_dofs_topological(V.sub(0), facet_tag.dim, facet_tag.find(1))
+    # base_dofs_y = fem.locate_dofs_topological(V.sub(1), facet_tag.dim, facet_tag.find(1))
+    base_dofs_z = fem.locate_dofs_topological(V.sub(2), facet_tag.dim, facet_tag.find(1))
     # += Set Dirichlet BCs of (1) on (2)
-    bc_base = fem.dirichletbc(u_base, base_dofs)
+    bc_base = fem.dirichletbc(default_scalar_type(0), base_dofs_z, V.sub(2))
     # += Top Dirichlet BCs
     #    (1): Interpolation space
     #    (2): Internal function to determine if on z = 0
-    top_dofs = fem.locate_dofs_geometrical(func_space, lambda x: np.isclose(x[2], LEN_Z))
-    # += Set values at the top boundary
-    u_top = fem.Function(func_space)
-    u_top.interpolate(lambda x: 0)
+    top_dofs_z = fem.locate_dofs_topological(V.sub(2), facet_tag.dim, facet_tag.find(2))
     # += Set Dirichlet BCs of (1) on (2)
-    bc_top = fem.dirichletbc(u_top, top_dofs)
+    bc_top = fem.dirichletbc(default_scalar_type(0.1), top_dofs_z, V.sub(2))
     # += Concatenate boundaries
     bc = [bc_base, bc_top]
 
-    # +==+==+ 
-    # Pressure Setup
-    # += Pressure expression, contribution of pressure at internal radius
-    p = ufl.exp(('p*x[0]/R', 'p*x[1]/R'), R = R0)
-    # += Pressure Space (decreasing order of interpolation by 1) 
-    pre_interp = fem.FunctionSpace(domain, ("Lagrange", test_order-1))
-    pressure = fem.Function(pre_interp)
-    # +=  Interpolate expression over points
-    pre_expr = fem.Expression(p, pre_interp.element.interpolation_points())
-    pressure.interpolate(pre_expr)
+    # # +==+==+ 
+    # # Pressure Setup
+    # # += Pressure expression, contribution of pressure at internal radius
+    # p = ufl.exp(('p*x[0]/R', 'p*x[1]/R'), R = R0)
+    # # += Pressure Space (decreasing order of interpolation by 1) 
+    # pre_interp = fem.FunctionSpace(domain, ("Lagrange", test_order-1))
+    # pressure = fem.Function(pre_interp)
+    # # +=  Interpolate expression over points
+    # pre_expr = fem.Expression(p, pre_interp.element.interpolation_points())
+    # pressure.interpolate(pre_expr)
 
     # +==+==+
     # Setup Parameteres for Variational Equation
@@ -190,7 +186,7 @@ def main(test_name, test_type, test_order, refine_check):
     #    (1): λ1^2 + λ2^2 + λ3^2; tr(C)
     Ic = ufl.variable(ufl.tr(C))
     #    (2): λ1^2*λ2^2 + λ2^2*λ3^2 + λ3^2*λ1^2; 0.5*[(tr(C)^2 - tr(C^2)]
-    IIc = ufl.variable(0.5 * [(ufl.tr(C)**2 - ufl.tr(C**2))])
+    # IIc = ufl.variable(0.5 * [(ufl.tr(C)**2 - ufl.tr(C**2))])
     #    (3): λ1^2*λ2^2*λ3^2; det(C) = J^2
     J = ufl.variable(ufl.det(F))
     # += Material Parameters
@@ -214,7 +210,7 @@ def main(test_name, test_type, test_order, refine_check):
     ds = ufl.Measure('ds', domain=domain, subdomain_data=facet_tag, metadata=metadata)
     dx = ufl.Measure("dx", domain=domain, metadata=metadata)
     # += Residual Equation (Variational, for solving)
-    R = ufl.inner(ufl.grad(v), P) * dx - ufl.inner(v, B) * dx - ufl.inner(v, T) * ds(2)
+    R = ufl.inner(ufl.grad(v), piola) * dx - ufl.inner(v, B) * dx - ufl.inner(v, T) * ds(2)
     # += Problem Setup and Solver
     problem = NonlinearProblem(R, u, bc)
     solver = NewtonSolver(domain.comm, problem)
@@ -223,6 +219,17 @@ def main(test_name, test_type, test_order, refine_check):
     solver.rtol = 1e-8
     # += Convergence criteria
     solver.convergence_criterion = "incremental"
+
+    num_its, converged = solver.solve(u)
+    if converged:
+        print(f"Converged in {num_its} iterations.")
+    else:
+        print(f"Not converged.")
+
+    # +==+==+
+    # ParaView export
+    with io.VTXWriter(MPI.COMM_WORLD, "deformation.bp", [u], engine="BP4") as vtx:
+        vtx.write(0.0)
 
 # +==+==+
 # Main check for script operation.
