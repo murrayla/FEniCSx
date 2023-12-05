@@ -97,7 +97,7 @@ def main(test_name, test_type, test_order, refine_check):
     #    (2): Multiprocessing assignment
     #    (3): Rank of multiprocessing
     #    (4): Dimension of mesh
-    domain, _, facet_markers = io.gmshio.read_from_msh("gmsh_msh/testCone.msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
+    domain, _, facet_markers = io.gmshio.read_from_msh("gmsh_msh/" + test_name + ".msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
     # += Create Vector Element
     #    (1): Interpolation style
     #    (2): Cell from mesh domain
@@ -151,7 +151,7 @@ def main(test_name, test_type, test_order, refine_check):
     #    (2): Internal function to determine if on z = 0
     top_dofs_z = fem.locate_dofs_topological(V.sub(2), facet_tag.dim, facet_tag.find(2))
     # += Set Dirichlet BCs of (1) on (2)
-    bc_top = fem.dirichletbc(default_scalar_type(0.1), top_dofs_z, V.sub(2))
+    bc_top = fem.dirichletbc(default_scalar_type(0.2), top_dofs_z, V.sub(2))
     # += Concatenate boundaries
     bc = [bc_base, bc_top]
 
@@ -186,9 +186,10 @@ def main(test_name, test_type, test_order, refine_check):
     #    (1): λ1^2 + λ2^2 + λ3^2; tr(C)
     Ic = ufl.variable(ufl.tr(C))
     #    (2): λ1^2*λ2^2 + λ2^2*λ3^2 + λ3^2*λ1^2; 0.5*[(tr(C)^2 - tr(C^2)]
-    # IIc = ufl.variable(0.5 * [(ufl.tr(C)**2 - ufl.tr(C**2))])
+    IIc = ufl.variable((Ic**2 - ufl.inner(C,C))/2)
     #    (3): λ1^2*λ2^2*λ3^2; det(C) = J^2
     J = ufl.variable(ufl.det(F))
+    IIIc = ufl.variable(ufl.det(C))
     # += Material Parameters
     E = default_scalar_type(1.0e4)
     nu = default_scalar_type(0.3)
@@ -198,9 +199,11 @@ def main(test_name, test_type, test_order, refine_check):
     lmbda = fem.Constant(domain, E * nu / ((1 + nu) * (1 - 2 * nu)))
     # += Strain Energy Density (compressible neo-Hookean model)
     #    (1): ψ = μ/2 * (Ic - 2) - μ * log(J) + λ/2 * log(J)^2
-    psi = (mu / 2) * (Ic - 3) - mu * ufl.ln(J) + (lmbda / 2) * (ufl.ln(J))**2
+    # psi = (mu / 2) * (Ic - 3) - mu * ufl.ln(J) + (lmbda / 2) * (ufl.ln(J))**2
+    psi = 2 * (Ic*J**(-2/3)-3) + 6 *(IIc*J**(-4/3)-3)
     # += First Piola Stress
     piola = ufl.diff(psi, F)
+
 
     # +==+==+
     # Setup Variational Problem Solver
@@ -224,11 +227,11 @@ def main(test_name, test_type, test_order, refine_check):
     if converged:
         print(f"Converged in {num_its} iterations.")
     else:
-        print(f"Not converged.")
+        print(f"Not converged after {num_its} iterations.")
 
     # +==+==+
     # ParaView export
-    with io.VTXWriter(MPI.COMM_WORLD, "deformation.bp", [u], engine="BP4") as vtx:
+    with io.VTXWriter(MPI.COMM_WORLD, test_name + ".bp", [u], engine="BP4") as vtx:
         vtx.write(0.0)
 
 # +==+==+
