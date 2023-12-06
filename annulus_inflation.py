@@ -102,12 +102,17 @@ def main(test_name, test_type, test_order, refine_check):
     #    (1): Interpolation style
     #    (2): Cell from mesh domain
     #    (3): Degree of interpolation style
-    element = ufl.VectorElement("Lagrange", domain.ufl_cell(), degree=MESH_DIM-1)  
+    element = ufl.VectorElement("Lagrange", domain.ufl_cell(), degree=2)  
+    pressure_element = ufl.FiniteElement("Lagrange", domain.ufl_cell(), degree=1)  
     # += Create Function Space
     #    (1): Mesh domain space
     #    (2): Finite element setup
     # += Geometry Space
-    V = fem.FunctionSpace(domain, element)
+    # Ve = fem.FunctionSpace(domain, element)
+    # Vp = fem.FunctionSpace(domain, pressure_element)
+
+    state_space = fem.FunctionSpace(domain, element * pressure_element)
+    V, _ = state_space.sub(0).collapse()
 
     # +==+==+
     # Determine Boundaries
@@ -141,19 +146,19 @@ def main(test_name, test_type, test_order, refine_check):
     # += Base Dirichlet BCs but broken per subspace
     #    (1): Interpolation space
     #    (2): Internal function to determine if on z = 0
-    base_dofs_x = fem.locate_dofs_topological(V.sub(0), facet_tag.dim, facet_tag.find(1))
-    base_dofs_y = fem.locate_dofs_topological(V.sub(1), facet_tag.dim, facet_tag.find(1))
-    base_dofs_z = fem.locate_dofs_topological(V.sub(2), facet_tag.dim, facet_tag.find(1))
+    base_dofs_x = fem.locate_dofs_topological((state_space.sub(0), V.sub(0)), facet_tag.dim, facet_tag.find(1))
+    base_dofs_y = fem.locate_dofs_topological((state_space.sub(0), V.sub(1)), facet_tag.dim, facet_tag.find(1))
+    base_dofs_z = fem.locate_dofs_topological((state_space.sub(0), V.sub(2)), facet_tag.dim, facet_tag.find(1))
     # += Set Dirichlet BCs of (1) on (2)
-    bc_base_x = fem.dirichletbc(default_scalar_type(0), base_dofs_x, V.sub(0))
-    bc_base_y = fem.dirichletbc(default_scalar_type(0), base_dofs_y, V.sub(1))
-    bc_base_z = fem.dirichletbc(default_scalar_type(0), base_dofs_z, V.sub(2))
+    bc_base_x = fem.dirichletbc(default_scalar_type(0), base_dofs_x, (state_space.sub(0), V.sub(0)))
+    bc_base_y = fem.dirichletbc(default_scalar_type(0), base_dofs_y, (state_space.sub(0), V.sub(1)))
+    bc_base_z = fem.dirichletbc(default_scalar_type(0), base_dofs_z, (state_space.sub(0), V.sub(2)))
     # += Top Dirichlet BCs
     #    (1): Interpolation space
     #    (2): Internal function to determine if on z = 0
-    top_dofs_z = fem.locate_dofs_topological(V.sub(2), facet_tag.dim, facet_tag.find(2))
+    top_dofs_z = fem.locate_dofs_topological((state_space.sub(0), V.sub(2)), facet_tag.dim, facet_tag.find(2))
     # += Set Dirichlet BCs of (1) on (2)
-    bc_top_z = fem.dirichletbc(default_scalar_type(0.2), top_dofs_z, V.sub(2))
+    bc_top_z = fem.dirichletbc(default_scalar_type(0.05), top_dofs_z, (state_space.sub(0), V.sub(2)))
     # += Concatenate boundaries
     bc = [bc_base_x, bc_base_y, bc_base_z, bc_top_z]
 
@@ -175,8 +180,9 @@ def main(test_name, test_type, test_order, refine_check):
     # += Traction Forces (nominal Piola-Kirchoff)
     T = fem.Constant(domain, default_scalar_type((0, 0, 0)))
     # += Test and Trial Functions
-    v = ufl.TestFunction(V)
-    u = fem.Function(V)
+    state = fem.Function(state_space, name="state")
+    v, q = ufl.TestFunctions(state_space)
+    u, p = state.split()
     # += Identity Tensor
     I = ufl.variable(ufl.Identity(MESH_DIM))
     # += Deformation Gradient Tensor
@@ -184,27 +190,36 @@ def main(test_name, test_type, test_order, refine_check):
     F = ufl.variable(I + ufl.grad(u))
     # += Right Cauchy-Green Tensor
     C = ufl.variable(F.T * F)
+    # += Green Strain Tensor
+    E = ufl.variable(0.5 * (C - I))
     # += Invariants
     #    (1): λ1^2 + λ2^2 + λ3^2; tr(C)
-    Ic = ufl.variable(ufl.tr(C))
-    # uniMod_Ic = ufl.variable(J**(-2/3) * Ic)
-    #    (2): λ1^2*λ2^2 + λ2^2*λ3^2 + λ3^2*λ1^2; 0.5*[(tr(C)^2 - tr(C^2)]
-    IIc = ufl.variable((Ic**2 - ufl.inner(C,C))/2)
-    # uniMod_IIc = ufl.variable(J**(-4/3) * IIc)
     #    (3): λ1^2*λ2^2*λ3^2; det(C) = J^2
     J = ufl.variable(ufl.det(F))
+    Ic = ufl.variable(ufl.tr(C))
+    uniMod_Ic = ufl.variable(J**(-2/3) * Ic)
+    #    (2): λ1^2*λ2^2 + λ2^2*λ3^2 + λ3^2*λ1^2; 0.5*[(tr(C)^2 - tr(C^2)]
+    IIc = ufl.variable((Ic**2 - ufl.inner(C,C))/2)
+    uniMod_IIc = ufl.variable(J**(-4/3) * IIc)
+    
     IIIc = ufl.variable(ufl.det(C))
     # += Material Parameters
     c1 = 2
     c2 = 6
+    kappa = 1
     # += Mooney-Rivlin Strain Energy Density Function
-    psi = c1 * (Ic - 3) + c2 *(IIc - 3)
+    # psi = c1 * (Ic - 3) + c2 *(IIc - 3) + kappa*(IIIc-1)**2
+    psi = c1 * (Ic - 3) + c2 *(IIc - 3) 
     # Terms
     gamma1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
     gamma2 = -ufl.diff(psi, IIc)
+    # sPK_term1 = ufl.diff(psi, Ic) + ufl.diff(Ic, E) + ufl.diff(psi, IIc) + ufl.diff(IIc, E)
+    # sPK_term2 = ufl.diff(psi, Ic) + ufl.diff(Ic, E.T) + ufl.diff(psi, IIc) + ufl.diff(IIc, E.T)
+    # sPK = 0.5 (sPK_term1 + sPK_term2)
+    firstPK = F * 2 * ufl.diff(psi, C)
     # += First Piola Stress
     # piola = ufl.diff(psi, F)
-    piola = 2 * F * (gamma1*I + gamma2*C) - J*60*ufl.inv(F).T
+    firstPK = 2 * F * (gamma1*I + gamma2*C) - J*p*ufl.inv(F).T
 
     # +==+==+
     # Setup Variational Problem Solver
@@ -214,9 +229,9 @@ def main(test_name, test_type, test_order, refine_check):
     ds = ufl.Measure('ds', domain=domain, subdomain_data=facet_tag, metadata=metadata)
     dx = ufl.Measure("dx", domain=domain, metadata=metadata)
     # += Residual Equation (Variational, for solving)
-    R = ufl.inner(ufl.grad(v), piola) * dx #- ufl.inner(v, B) * dx # - ufl.inner(v, T) * ds(2)
+    R = ufl.inner(ufl.grad(v), firstPK) * dx + q * (J - 1) * dx#- ufl.inner(v, B) * dx # - ufl.inner(v, T) * ds(2)
     # += Problem Setup and Solver
-    problem = NonlinearProblem(R, u, bc)
+    problem = NonlinearProblem(R, state, bc)
     solver = NewtonSolver(domain.comm, problem)
     # += Tolerances for convergence
     solver.atol = 1e-8
@@ -224,7 +239,8 @@ def main(test_name, test_type, test_order, refine_check):
     # += Convergence criteria
     solver.convergence_criterion = "incremental"
 
-    num_its, converged = solver.solve(u)
+    num_its, converged = solver.solve(state)
+    u_sol, p_sol = state.split()
     if converged:
         print(f"Converged in {num_its} iterations.")
     else:
