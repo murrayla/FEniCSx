@@ -88,7 +88,7 @@ def gen_annulus(test_name, test_type, test_order, refine_check):
 def main(test_name, test_type, test_order, refine_check):
     # +==+==+
     # Mesh Generation
-    gen_annulus(test_name, test_type, test_order, refine_check)
+    # gen_annulus(test_name, test_type, test_order, refine_check)
 
     # +==+==+
     # Load Domain & Interpolation
@@ -102,32 +102,32 @@ def main(test_name, test_type, test_order, refine_check):
     #    (1): Interpolation style
     #    (2): Cell from mesh domain
     #    (3): Degree of interpolation style
-    element = ufl.VectorElement("Lagrange", domain.ufl_cell(), degree=2)  
-    pressure_element = ufl.FiniteElement("Lagrange", domain.ufl_cell(), degree=1)  
+    VE2 = ufl.VectorElement("Lagrange", domain.ufl_cell(), degree=2)  
+    FE1 = ufl.FiniteElement("Lagrange", domain.ufl_cell(), degree=1)  
     # += Create Function Space
     #    (1): Mesh domain space
     #    (2): Finite element setup
-    # += Geometry Space
-    # Ve = fem.FunctionSpace(domain, element)
-    # Vp = fem.FunctionSpace(domain, pressure_element)
-
-    state_space = fem.FunctionSpace(domain, element * pressure_element)
-    V, _ = state_space.sub(0).collapse()
+    # += Find total Function Space which contains both interpolation schemes
+    W = fem.FunctionSpace(domain, ufl.MixedElement([VE2, FE1]))
+    w = fem.Function(W)
+    # Collapse into just Geometric Space
+    V, _ = W.sub(0).collapse()
 
     # +==+==+
     # Determine Boundaries
+    fdim = MESH_DIM-1
     #    (1): Base
-    base_facets = mesh.locate_entities_boundary(domain, MESH_DIM-1, lambda x: np.isclose(x[2], 0))
+    base_facets = mesh.locate_entities_boundary(domain, fdim, lambda x: np.isclose(x[2], 0))
     #    (2): Top
-    top_facets = mesh.locate_entities_boundary(domain, MESH_DIM-1, lambda x: np.isclose(x[2], LEN_Z))
+    top_facets = mesh.locate_entities_boundary(domain, fdim, lambda x: np.isclose(x[2], LEN_Z))
     #    (3): Inner Cylinder Surface
     def inner_bound(x):
         return np.isclose(np.sqrt(x[0]**2+x[1]**2), R0)
-    inner_facets = mesh.locate_entities_boundary(domain, MESH_DIM-1, inner_bound)
+    inner_facets = mesh.locate_entities_boundary(domain, fdim, inner_bound)
     #    (4): Outer Cylinder Surface
     def outer_bound(x):
         return np.isclose(np.sqrt(x[0]**2+x[1]**2), R1)
-    outer_facets = mesh.locate_entities_boundary(domain, MESH_DIM-1, outer_bound)
+    outer_facets = mesh.locate_entities_boundary(domain, fdim, outer_bound)
     # += Collate Marked boundaries
     marked_facets = np.hstack([base_facets, top_facets, inner_facets, outer_facets])
     # += Assign boundaries IDs
@@ -139,28 +139,35 @@ def main(test_name, test_type, test_order, refine_check):
     ])
     # += Sort and assign
     sorted_facets = np.argsort(marked_facets)
-    facet_tag = mesh.meshtags(domain, MESH_DIM-1, marked_facets[sorted_facets], marked_values[sorted_facets])
+    facet_tag = mesh.meshtags(domain, fdim, marked_facets[sorted_facets], marked_values[sorted_facets])
 
     # +==+==+
     # Boundary Conditions
     # += Base Dirichlet BCs but broken per subspace
     #    (1): Interpolation space
     #    (2): Internal function to determine if on z = 0
-    base_dofs_x = fem.locate_dofs_topological((state_space.sub(0), V.sub(0)), facet_tag.dim, facet_tag.find(1))
-    base_dofs_y = fem.locate_dofs_topological((state_space.sub(0), V.sub(1)), facet_tag.dim, facet_tag.find(1))
-    base_dofs_z = fem.locate_dofs_topological((state_space.sub(0), V.sub(2)), facet_tag.dim, facet_tag.find(1))
+    # base_dofs_x = fem.locate_dofs_topological((state_space.sub(0), V.sub(0)), facet_tag.dim, facet_tag.find(1))
+    # base_dofs_y = fem.locate_dofs_topological((state_space.sub(0), V.sub(1)), facet_tag.dim, facet_tag.find(1))
+    base_dofs_z = fem.locate_dofs_topological((W.sub(0), V), facet_tag.dim, facet_tag.find(1))
     # += Set Dirichlet BCs of (1) on (2)
-    bc_base_x = fem.dirichletbc(default_scalar_type(0), base_dofs_x, (state_space.sub(0), V.sub(0)))
-    bc_base_y = fem.dirichletbc(default_scalar_type(0), base_dofs_y, (state_space.sub(0), V.sub(1)))
-    bc_base_z = fem.dirichletbc(default_scalar_type(0), base_dofs_z, (state_space.sub(0), V.sub(2)))
+    # bc_base_x = fem.dirichletbc(default_scalar_type(0), base_dofs_x, (state_space.sub(0), V.sub(0)))
+    # bc_base_y = fem.dirichletbc(default_scalar_type(0), base_dofs_y, (state_space.sub(0), V.sub(1)))
+    u0_bc = fem.Function(V)
+    u0 = lambda x: np.zeros_like(x, dtype=default_scalar_type)
+    u0_bc.interpolate(u0)
+    bc_base_z = fem.dirichletbc(u0_bc, base_dofs_z, W.sub(0))
     # += Top Dirichlet BCs
     #    (1): Interpolation space
     #    (2): Internal function to determine if on z = 0
-    top_dofs_z = fem.locate_dofs_topological((state_space.sub(0), V.sub(2)), facet_tag.dim, facet_tag.find(2))
-    # += Set Dirichlet BCs of (1) on (2)
-    bc_top_z = fem.dirichletbc(default_scalar_type(0.05), top_dofs_z, (state_space.sub(0), V.sub(2)))
+    # top_dofs_z = fem.locate_dofs_topological(W.sub(0).sub(2), facet_tag.dim, facet_tag.find(2))
+    # # += Set Dirichlet BCs of (1) on (2)
+    # u1_bc = fem.Function(V)
+    # u1 = lambda x: np.zeros_like(x, dtype=default_scalar_type)
+    # u1_bc.interpolate(u1)
+    # bc_top_z = fem.dirichletbc(default_scalar_type(0), top_dofs_z, V.sub(2))
+    # bc_top_z = fem.dirichletbc(default_scalar_type(0.05), top_dofs_z, (state_space.sub(0), V.sub(2)))
     # += Concatenate boundaries
-    bc = [bc_base_x, bc_base_y, bc_base_z, bc_top_z]
+    bc = [bc_base_z]
 
     # # +==+==+ 
     # # Pressure Setup
@@ -175,51 +182,60 @@ def main(test_name, test_type, test_order, refine_check):
 
     # +==+==+
     # Setup Parameteres for Variational Equation
-    # += Body Forces
-    B = fem.Constant(domain, default_scalar_type((0, 0, 0)))
-    # += Traction Forces (nominal Piola-Kirchoff)
-    T = fem.Constant(domain, default_scalar_type((0, 0, 0)))
     # += Test and Trial Functions
-    state = fem.Function(state_space, name="state")
-    v, q = ufl.TestFunctions(state_space)
-    u, p = state.split()
-    # += Identity Tensor
-    I = ufl.variable(ufl.Identity(MESH_DIM))
-    # += Deformation Gradient Tensor
-    #    F = ∂u/∂X + I
+    state = fem.Function(W, name="state")
+    v, q = ufl.TestFunctions(W)
+    u, p = ufl.split(w)
+    # # += Identity Tensor
+    # I = ufl.variable(ufl.Identity(MESH_DIM))
+    # # += Deformation Gradient Tensor
+    # #    F = ∂u/∂X + I
+    # F = ufl.variable(I + ufl.grad(u))
+    # # += Right Cauchy-Green Tensor
+    # C = ufl.variable(F.T * F)
+    # # += Invariants
+    # #    (1): λ1^2 + λ2^2 + λ3^2; tr(C)
+    # #    (3): λ1^2*λ2^2*λ3^2; det(C) = J^2
+    # Ic = ufl.variable(ufl.tr(C))
+    # # uniMod_Ic = ufl.variable(J**(-2/3) * Ic)
+    # #    (2): λ1^2*λ2^2 + λ2^2*λ3^2 + λ3^2*λ1^2; 0.5*[(tr(C)^2 - tr(C^2)]
+    # IIc = ufl.variable((Ic**2 - ufl.inner(C,C))/2)
+    # # uniMod_IIc = ufl.variable(J**(-4/3) * IIc)
+    # J = ufl.variable(ufl.det(F))
+    # # IIIc = ufl.variable(ufl.det(C))
+    # # += Material Parameters
+    # c1 = 2
+    # c2 = 6
+    # # kappa = 1
+    # # += Mooney-Rivlin Strain Energy Density Function
+    # # psi = c1 * (Ic - 3) + c2 *(IIc - 3) + kappa*(IIIc-1)**2
+    # psi = c1 * (Ic - 3) + c2 *(IIc - 3) 
+    # # Terms
+    # gamma1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
+    # gamma2 = -ufl.diff(psi, IIc)
+    # # sPK_term1 = ufl.diff(psi, Ic) + ufl.diff(Ic, E) + ufl.diff(psi, IIc) + ufl.diff(IIc, E)
+    # # sPK_term2 = ufl.diff(psi, Ic) + ufl.diff(Ic, E.T) + ufl.diff(psi, IIc) + ufl.diff(IIc, E.T)
+    # # sPK = 0.5 (sPK_term1 + sPK_term2)
+    # firstPK = F * 2 * ufl.diff(psi, C)
+    # # += First Piola Stress
+    # # piola = ufl.diff(psi, F)
+    # firstPK = 2 * F * (gamma1*I + gamma2*C) + p * J * ufl.inv(F).T
+
+    d = len(u)
+    I = ufl.variable(ufl.Identity(d))
     F = ufl.variable(I + ufl.grad(u))
-    # += Right Cauchy-Green Tensor
     C = ufl.variable(F.T * F)
-    # += Green Strain Tensor
-    E = ufl.variable(0.5 * (C - I))
-    # += Invariants
-    #    (1): λ1^2 + λ2^2 + λ3^2; tr(C)
-    #    (3): λ1^2*λ2^2*λ3^2; det(C) = J^2
-    J = ufl.variable(ufl.det(F))
     Ic = ufl.variable(ufl.tr(C))
-    uniMod_Ic = ufl.variable(J**(-2/3) * Ic)
-    #    (2): λ1^2*λ2^2 + λ2^2*λ3^2 + λ3^2*λ1^2; 0.5*[(tr(C)^2 - tr(C^2)]
-    IIc = ufl.variable((Ic**2 - ufl.inner(C,C))/2)
-    uniMod_IIc = ufl.variable(J**(-4/3) * IIc)
-    
-    IIIc = ufl.variable(ufl.det(C))
-    # += Material Parameters
-    c1 = 2
-    c2 = 6
-    kappa = 1
-    # += Mooney-Rivlin Strain Energy Density Function
-    # psi = c1 * (Ic - 3) + c2 *(IIc - 3) + kappa*(IIIc-1)**2
-    psi = c1 * (Ic - 3) + c2 *(IIc - 3) 
-    # Terms
-    gamma1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
-    gamma2 = -ufl.diff(psi, IIc)
-    # sPK_term1 = ufl.diff(psi, Ic) + ufl.diff(Ic, E) + ufl.diff(psi, IIc) + ufl.diff(IIc, E)
-    # sPK_term2 = ufl.diff(psi, Ic) + ufl.diff(Ic, E.T) + ufl.diff(psi, IIc) + ufl.diff(IIc, E.T)
-    # sPK = 0.5 (sPK_term1 + sPK_term2)
-    firstPK = F * 2 * ufl.diff(psi, C)
-    # += First Piola Stress
-    # piola = ufl.diff(psi, F)
-    firstPK = 2 * F * (gamma1*I + gamma2*C) - J*p*ufl.inv(F).T
+    J  = ufl.variable(ufl.det(F))
+
+    # Elasticity parameters
+    E = default_scalar_type(1.0e4)
+    nu = default_scalar_type(0.5)
+    mu = fem.Constant(domain, E/(2*(1 + nu)))
+
+    # Stored strain energy density (fully incompressible neo-Hookean model)
+    psi = (mu / 2) * (Ic - 3) - mu * ufl.ln(J)
+    firstPK = ufl.diff(psi, F) + p * J * ufl.inv(F.T)
 
     # +==+==+
     # Setup Variational Problem Solver
@@ -229,9 +245,9 @@ def main(test_name, test_type, test_order, refine_check):
     ds = ufl.Measure('ds', domain=domain, subdomain_data=facet_tag, metadata=metadata)
     dx = ufl.Measure("dx", domain=domain, metadata=metadata)
     # += Residual Equation (Variational, for solving)
-    R = ufl.inner(ufl.grad(v), firstPK) * dx + q * (J - 1) * dx#- ufl.inner(v, B) * dx # - ufl.inner(v, T) * ds(2)
+    R = ufl.inner(ufl.grad(v), firstPK) * dx + q * (J - 1) * dx 
     # += Problem Setup and Solver
-    problem = NonlinearProblem(R, state, bc)
+    problem = NonlinearProblem(R, w, bc)
     solver = NewtonSolver(domain.comm, problem)
     # += Tolerances for convergence
     solver.atol = 1e-8
@@ -239,7 +255,7 @@ def main(test_name, test_type, test_order, refine_check):
     # += Convergence criteria
     solver.convergence_criterion = "incremental"
 
-    num_its, converged = solver.solve(state)
+    num_its, converged = solver.solve(w)
     u_sol, p_sol = state.split()
     if converged:
         print(f"Converged in {num_its} iterations.")
@@ -248,7 +264,7 @@ def main(test_name, test_type, test_order, refine_check):
 
     # +==+==+
     # ParaView export
-    with io.VTXWriter(MPI.COMM_WORLD, test_name + ".bp", [u], engine="BP4") as vtx:
+    with io.VTXWriter(MPI.COMM_WORLD, test_name + ".bp", [u_sol], engine="BP4") as vtx:
         vtx.write(0.0)
 
 # +==+==+
