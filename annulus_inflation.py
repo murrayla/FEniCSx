@@ -112,6 +112,7 @@ def main(test_name, test_type, test_order, refine_check):
     w = fem.Function(W)
     # Collapse into just Geometric Space
     V, _ = W.sub(0).collapse()
+    Vz, _ = V.sub(2).collapse()
 
     # +==+==+
     # Determine Boundaries
@@ -159,15 +160,14 @@ def main(test_name, test_type, test_order, refine_check):
     # += Top Dirichlet BCs
     #    (1): Interpolation space
     #    (2): Internal function to determine if on z = 0
-    # top_dofs_z = fem.locate_dofs_topological(W.sub(0).sub(2), facet_tag.dim, facet_tag.find(2))
+    top_dofs_z = fem.locate_dofs_topological((W.sub(0).sub(2), Vz), facet_tag.dim, facet_tag.find(2))
     # # += Set Dirichlet BCs of (1) on (2)
-    # u1_bc = fem.Function(V)
-    # u1 = lambda x: np.zeros_like(x, dtype=default_scalar_type)
-    # u1_bc.interpolate(u1)
-    # bc_top_z = fem.dirichletbc(default_scalar_type(0), top_dofs_z, V.sub(2))
-    # bc_top_z = fem.dirichletbc(default_scalar_type(0.05), top_dofs_z, (state_space.sub(0), V.sub(2)))
+    u1_bc = fem.Function(Vz)
+    u1 = lambda x: np.full(x.shape[1], default_scalar_type(0.2))
+    u1_bc.interpolate(u1)
+    bc_top_z = fem.dirichletbc(u1_bc, top_dofs_z, W.sub(0).sub(2))
     # += Concatenate boundaries
-    bc = [bc_base_z]
+    bc = [bc_base_z, bc_top_z]
 
     # # +==+==+ 
     # # Pressure Setup
@@ -183,59 +183,33 @@ def main(test_name, test_type, test_order, refine_check):
     # +==+==+
     # Setup Parameteres for Variational Equation
     # += Test and Trial Functions
-    state = fem.Function(W, name="state")
     v, q = ufl.TestFunctions(W)
     u, p = ufl.split(w)
     # # += Identity Tensor
-    # I = ufl.variable(ufl.Identity(MESH_DIM))
-    # # += Deformation Gradient Tensor
-    # #    F = ∂u/∂X + I
-    # F = ufl.variable(I + ufl.grad(u))
-    # # += Right Cauchy-Green Tensor
-    # C = ufl.variable(F.T * F)
-    # # += Invariants
-    # #    (1): λ1^2 + λ2^2 + λ3^2; tr(C)
-    # #    (3): λ1^2*λ2^2*λ3^2; det(C) = J^2
-    # Ic = ufl.variable(ufl.tr(C))
-    # # uniMod_Ic = ufl.variable(J**(-2/3) * Ic)
-    # #    (2): λ1^2*λ2^2 + λ2^2*λ3^2 + λ3^2*λ1^2; 0.5*[(tr(C)^2 - tr(C^2)]
-    # IIc = ufl.variable((Ic**2 - ufl.inner(C,C))/2)
-    # # uniMod_IIc = ufl.variable(J**(-4/3) * IIc)
-    # J = ufl.variable(ufl.det(F))
-    # # IIIc = ufl.variable(ufl.det(C))
-    # # += Material Parameters
-    # c1 = 2
-    # c2 = 6
-    # # kappa = 1
-    # # += Mooney-Rivlin Strain Energy Density Function
-    # # psi = c1 * (Ic - 3) + c2 *(IIc - 3) + kappa*(IIIc-1)**2
-    # psi = c1 * (Ic - 3) + c2 *(IIc - 3) 
-    # # Terms
-    # gamma1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
-    # gamma2 = -ufl.diff(psi, IIc)
-    # # sPK_term1 = ufl.diff(psi, Ic) + ufl.diff(Ic, E) + ufl.diff(psi, IIc) + ufl.diff(IIc, E)
-    # # sPK_term2 = ufl.diff(psi, Ic) + ufl.diff(Ic, E.T) + ufl.diff(psi, IIc) + ufl.diff(IIc, E.T)
-    # # sPK = 0.5 (sPK_term1 + sPK_term2)
-    # firstPK = F * 2 * ufl.diff(psi, C)
-    # # += First Piola Stress
-    # # piola = ufl.diff(psi, F)
-    # firstPK = 2 * F * (gamma1*I + gamma2*C) + p * J * ufl.inv(F).T
-
-    d = len(u)
-    I = ufl.variable(ufl.Identity(d))
+    I = ufl.variable(ufl.Identity(MESH_DIM))
+    # += Deformation Gradient Tensor
+    #    F = ∂u/∂X + I
     F = ufl.variable(I + ufl.grad(u))
+    # += Right Cauchy-Green Tensor
     C = ufl.variable(F.T * F)
+    # += Invariants
+    #    (1): λ1^2 + λ2^2 + λ3^2; tr(C)
     Ic = ufl.variable(ufl.tr(C))
-    J  = ufl.variable(ufl.det(F))
-
-    # Elasticity parameters
-    E = default_scalar_type(1.0e4)
-    nu = default_scalar_type(0.5)
-    mu = fem.Constant(domain, E/(2*(1 + nu)))
-
-    # Stored strain energy density (fully incompressible neo-Hookean model)
-    psi = (mu / 2) * (Ic - 3) - mu * ufl.ln(J)
-    firstPK = ufl.diff(psi, F) + p * J * ufl.inv(F.T)
+    #    (2): λ1^2*λ2^2 + λ2^2*λ3^2 + λ3^2*λ1^2; 0.5*[(tr(C)^2 - tr(C^2)]
+    IIc = ufl.variable((Ic**2 - ufl.inner(C,C))/2)
+    #    (3): λ1^2*λ2^2*λ3^2; det(C) = J^2
+    J = ufl.variable(ufl.det(F))
+    # IIIc = ufl.variable(ufl.det(C))
+    # += Material Parameters
+    c1 = 2
+    c2 = 6
+    # += Mooney-Rivlin Strain Energy Density Function
+    psi = c1 * (Ic - 3) + c2 *(IIc - 3) 
+    # Terms
+    gamma1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
+    gamma2 = -ufl.diff(psi, IIc)
+    # += First Piola Stress
+    firstPK = 2 * F * (gamma1*I + gamma2*C) + p * J * ufl.inv(F).T
 
     # +==+==+
     # Setup Variational Problem Solver
@@ -256,7 +230,7 @@ def main(test_name, test_type, test_order, refine_check):
     solver.convergence_criterion = "incremental"
 
     num_its, converged = solver.solve(w)
-    u_sol, p_sol = state.split()
+    u_sol, p_sol = w.split()
     if converged:
         print(f"Converged in {num_its} iterations.")
     else:
@@ -264,8 +238,13 @@ def main(test_name, test_type, test_order, refine_check):
 
     # +==+==+
     # ParaView export
-    with io.VTXWriter(MPI.COMM_WORLD, test_name + ".bp", [u_sol], engine="BP4") as vtx:
+    with io.VTXWriter(MPI.COMM_WORLD, test_name + ".bp", w.sub(0).collapse(), engine="BP4") as vtx:
         vtx.write(0.0)
+        vtx.close()
+
+    with io.VTXWriter(MPI.COMM_WORLD, test_name + "pressure.bp", w.sub(1).collapse(), engine="BP4") as vtx:
+        vtx.write(0.0)
+        vtx.close()
 
 # +==+==+
 # Main check for script operation.
