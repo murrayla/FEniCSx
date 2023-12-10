@@ -28,7 +28,8 @@ MESH_DIM = 3
 LEN_Z = 1
 R0 = 1
 R1 = 1.5
-P = 1.5
+P_INNER = 10
+P_OUTER = -10
 
 # +==+==+==+
 # gen_annulus Function 
@@ -98,6 +99,11 @@ def main(test_name, test_type, test_order, refine_check):
     #    (3): Rank of multiprocessing
     #    (4): Dimension of mesh
     domain, _, facet_markers = io.gmshio.read_from_msh("gmsh_msh/" + test_name + ".msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
+    tdim = domain.topology.dim
+    fdim = tdim - 1
+    domain.topology.create_entities(fdim)
+    domain.topology.create_connectivity(fdim, tdim)
+    domain.topology.create_connectivity(tdim, fdim)
     # += Create Vector Element
     #    (1): Interpolation style
     #    (2): Cell from mesh domain
@@ -110,13 +116,17 @@ def main(test_name, test_type, test_order, refine_check):
     # += Find total Function Space which contains both interpolation schemes
     W = fem.FunctionSpace(domain, ufl.MixedElement([VE2, FE1]))
     w = fem.Function(W)
-    # Collapse into just Geometric Space
+    # += Collapse into geometric space 
     V, _ = W.sub(0).collapse()
+    #    (1): x-subdomain
+    Vx, _ = V.sub(0).collapse()
+    #    (2): y-subdomain
+    Vy, _ = V.sub(1).collapse()
+    #    (3): z-subdomain
     Vz, _ = V.sub(2).collapse()
 
     # +==+==+
     # Determine Boundaries
-    fdim = MESH_DIM-1
     #    (1): Base
     base_facets = mesh.locate_entities_boundary(domain, fdim, lambda x: np.isclose(x[2], 0))
     #    (2): Top
@@ -147,38 +157,35 @@ def main(test_name, test_type, test_order, refine_check):
     # += Base Dirichlet BCs but broken per subspace
     #    (1): Interpolation space
     #    (2): Internal function to determine if on z = 0
-    # base_dofs_x = fem.locate_dofs_topological((state_space.sub(0), V.sub(0)), facet_tag.dim, facet_tag.find(1))
-    # base_dofs_y = fem.locate_dofs_topological((state_space.sub(0), V.sub(1)), facet_tag.dim, facet_tag.find(1))
-    base_dofs_z = fem.locate_dofs_topological((W.sub(0), V), facet_tag.dim, facet_tag.find(1))
+    base_dofs_x = fem.locate_dofs_topological((W.sub(0).sub(0), Vz), facet_tag.dim, facet_tag.find(1))
+    base_dofs_y = fem.locate_dofs_topological((W.sub(0).sub(1), Vz), facet_tag.dim, facet_tag.find(1))
+    base_dofs_z = fem.locate_dofs_topological((W.sub(0).sub(2), Vz), facet_tag.dim, facet_tag.find(1))
     # += Set Dirichlet BCs of (1) on (2)
-    # bc_base_x = fem.dirichletbc(default_scalar_type(0), base_dofs_x, (state_space.sub(0), V.sub(0)))
-    # bc_base_y = fem.dirichletbc(default_scalar_type(0), base_dofs_y, (state_space.sub(0), V.sub(1)))
-    u0_bc = fem.Function(V)
-    u0 = lambda x: np.zeros_like(x, dtype=default_scalar_type)
-    u0_bc.interpolate(u0)
-    bc_base_z = fem.dirichletbc(u0_bc, base_dofs_z, W.sub(0))
+    u0 = lambda x: np.full(x.shape[1], default_scalar_type(0.0))
+    u0_bc_x = fem.Function(Vx)
+    u0_bc_x.interpolate(u0)
+    bc_base_x = fem.dirichletbc(u0_bc_x, base_dofs_x, W.sub(0).sub(0))
+    u0_bc_y = fem.Function(Vy)
+    u0_bc_y.interpolate(u0)
+    bc_base_y = fem.dirichletbc(u0_bc_y, base_dofs_y, W.sub(0).sub(1))
+    u0_bc_z = fem.Function(Vz)
+    u0_bc_z.interpolate(u0)
+    bc_base_z = fem.dirichletbc(u0_bc_z, base_dofs_z, W.sub(0).sub(2))
     # += Top Dirichlet BCs
-    #    (1): Interpolation space
-    #    (2): Internal function to determine if on z = 0
     top_dofs_z = fem.locate_dofs_topological((W.sub(0).sub(2), Vz), facet_tag.dim, facet_tag.find(2))
     # # += Set Dirichlet BCs of (1) on (2)
     u1_bc = fem.Function(Vz)
-    u1 = lambda x: np.full(x.shape[1], default_scalar_type(0.2))
+    u1 = lambda x: np.full(x.shape[1], default_scalar_type(0.0))
     u1_bc.interpolate(u1)
     bc_top_z = fem.dirichletbc(u1_bc, top_dofs_z, W.sub(0).sub(2))
     # += Concatenate boundaries
-    bc = [bc_base_z, bc_top_z]
+    # bc = [bc_base_x, bc_base_y, bc_base_z]
 
     # # +==+==+ 
     # # Pressure Setup
-    # # += Pressure expression, contribution of pressure at internal radius
-    # p = ufl.exp(('p*x[0]/R', 'p*x[1]/R'), R = R0)
-    # # += Pressure Space (decreasing order of interpolation by 1) 
-    # pre_interp = fem.FunctionSpace(domain, ("Lagrange", test_order-1))
-    # pressure = fem.Function(pre_interp)
-    # # +=  Interpolate expression over points
-    # pre_expr = fem.Expression(p, pre_interp.element.interpolation_points())
-    # pressure.interpolate(pre_expr)
+    p_inner = fem.Constant(domain, default_scalar_type(P_INNER))
+    p_outer = fem.Constant(domain, default_scalar_type(P_OUTER))
+    n = ufl.FacetNormal(domain)
 
     # +==+==+
     # Setup Parameteres for Variational Equation
@@ -219,8 +226,9 @@ def main(test_name, test_type, test_order, refine_check):
     ds = ufl.Measure('ds', domain=domain, subdomain_data=facet_tag, metadata=metadata)
     dx = ufl.Measure("dx", domain=domain, metadata=metadata)
     # += Residual Equation (Variational, for solving)
-    R = ufl.inner(ufl.grad(v), firstPK) * dx + q * (J - 1) * dx 
-    # += Problem Setup and Solver
+    R = ufl.inner(ufl.grad(v), firstPK) * dx + q * (J - 1) * dx \
+        - ufl.inner(p_inner * n, v) * ds(2) \
+        - ufl.inner(p_outer * n, v) * ds(1) #- p_inner * J * ufl.dot(ufl.inv(F).T * n, v) * ds(3)
     problem = NonlinearProblem(R, w, bc)
     solver = NewtonSolver(domain.comm, problem)
     # += Tolerances for convergence
