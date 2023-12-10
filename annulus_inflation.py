@@ -28,9 +28,9 @@ MESH_DIM = 3
 LEN_Z = 1
 R0 = 1
 R1 = 1.5
-P_INNER = 10
-P_OUTER = -10
-LAMBDA = 0.1 * LEN_Z
+P_INNER = -15
+P_OUTER = 0
+LAMBDA = 0.2 * LEN_Z
 FT = {"z0": 1, "z1": 2, "r0": 3, "r1": 4, "volume": 5}
 X, Y, Z = 0, 1, 2
 
@@ -121,21 +121,6 @@ def main(test_name, test_type, test_order, refine_check):
     Vx, _ = V.sub(X).collapse()
     Vy, _ = V.sub(Y).collapse()
     Vz, _ = V.sub(Z).collapse()
-
-    # +==+==+
-    # Determine Boundaries
-    #    (1): Base
-    # base_facets = mesh.locate_entities_boundary(domain, fdim, lambda x: np.isclose(x[2], 0))
-    # #    (2): Top
-    # top_facets = mesh.locate_entities_boundary(domain, fdim, lambda x: np.isclose(x[2], LEN_Z))
-    # #    (3): Inner Cylinder Surface
-    # def inner_bound(x):
-    #     return np.isclose(np.sqrt(x[0]**2+x[1]**2), R0)
-    # inner_facets = mesh.locate_entities_boundary(domain, fdim, inner_bound)
-    # #    (4): Outer Cylinder Surface
-    # def outer_bound(x):
-    #     return np.isclose(np.sqrt(x[0]**2+x[1]**2), R1)
-    # outer_facets = mesh.locate_entities_boundary(domain, fdim, outer_bound)
 
     # += Collate Marked boundaries
     marked_facets = np.hstack([z0_facets, z1_facets, r0_facets, r1_facets])
@@ -243,9 +228,9 @@ def main(test_name, test_type, test_order, refine_check):
     ds = ufl.Measure('ds', domain=domain, subdomain_data=facet_tag, metadata=metadata)
     dx = ufl.Measure("dx", domain=domain, metadata=metadata)
     # += Residual Equation (Variational, for solving)
-    R = ufl.inner(ufl.grad(v), firstPK) * dx + q * (J - 1) * dx 
-        # - ufl.inner(p_inner * n, v) * ds(2) \
-        # - ufl.inner(p_outer * n, v) * ds(1) #- p_inner * J * ufl.dot(ufl.inv(F).T * n, v) * ds(3)
+    R = ufl.inner(ufl.grad(v), firstPK) * dx + q * (J - 1) * dx \
+        - p_inner * ufl.inner(n, v) * ds(3) \
+        - p_outer * ufl.inner(n, v) * ds(4) 
     problem = NonlinearProblem(R, w, bc)
     solver = NewtonSolver(domain.comm, problem)
     # += Tolerances for convergence
