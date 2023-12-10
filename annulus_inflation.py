@@ -30,6 +30,9 @@ R0 = 1
 R1 = 1.5
 P_INNER = 10
 P_OUTER = -10
+LAMBDA = 0.1 * LEN_Z
+FT = {"z0": 1, "z1": 2, "r0": 3, "r1": 4, "volume": 5}
+X, Y, Z = 0, 1, 2
 
 # +==+==+==+
 # gen_annulus Function 
@@ -49,22 +52,21 @@ def gen_annulus(test_name, test_type, test_order, refine_check):
     gmsh.initialize()
     gmsh.model.add(test_name)
     # += Setup base of annulus, surface
-    innerCircle = gmsh.model.occ.addCircle(x=0, y=0, z=0, r=R0, tag=1)
-    outerCircle = gmsh.model.occ.addCircle(x=0, y=0, z=0, r=R1, tag=2)
-    innerCircleCurve = gmsh.model.occ.addCurveLoop([innerCircle], 1)
-    outerCircleCurve = gmsh.model.occ.addCurveLoop([outerCircle], 2)
-    baseSurface = gmsh.model.occ.addPlaneSurface(wireTags=[outerCircle, innerCircle], tag=1)
-    # += Synchronize and add physical group
-    basePhysicalGroup = gmsh.model.addPhysicalGroup(dim=2, tags=[baseSurface], tag=100, name="Annulus Base Surface")
+    innerCircle = gmsh.model.occ.addCircle(x=0, y=0, z=0, r=R0, tag=FT["r0"])
+    outerCircle = gmsh.model.occ.addCircle(x=0, y=0, z=0, r=R1, tag=FT["r1"])
+    innerCircleCurve = gmsh.model.occ.addCurveLoop(curveTags=[innerCircle], tag=FT["r0"])
+    outerCircleCurve = gmsh.model.occ.addCurveLoop(curveTags=[outerCircle], tag=FT["r1"])
+    baseSurface = gmsh.model.occ.addPlaneSurface(wireTags=[outerCircle, innerCircle], tag=FT["z0"])
     gmsh.model.occ.synchronize()
     # += Extrude from geometry
     baseExtrusion = gmsh.model.occ.extrude(dimTags=[(2, baseSurface)], dx=0, dy=0, dz=LEN_Z)
     gmsh.model.occ.synchronize()
-    # += Create Physical Group on volume
-    volumePhysicalGroup = gmsh.model.addPhysicalGroup(3, [baseExtrusion[1][1]], tag=1000, name="Internal Volume")
-    innerPhysicalGroup = gmsh.model.addPhysicalGroup(2, [baseExtrusion[3][1]], tag =101, name="Inner Surface")
-    outerPhysicalGroup = gmsh.model.addPhysicalGroup(2, [baseExtrusion[2][1]], tag =102, name="Outer Surface")
-    topPhysicalGroup = gmsh.model.addPhysicalGroup(2, [baseExtrusion[0][1]], tag =103, name="Annulus Top Surface")
+    # # += Create Physical Group on volume
+    basePhysicalGroup = gmsh.model.addPhysicalGroup(dim=2, tags=[baseSurface], tag=FT["z0"], name="Base Surface(1)")
+    topPhysicalGroup = gmsh.model.addPhysicalGroup(dim=2, tags=[baseExtrusion[0][1]], tag=FT["z1"], name="Top Surface (2)")
+    innerPhysicalGroup = gmsh.model.addPhysicalGroup(dim=2, tags=[baseExtrusion[3][1]], tag=FT["r0"], name="Inner Surface (3)")
+    outerPhysicalGroup = gmsh.model.addPhysicalGroup(dim=2, tags=[baseExtrusion[2][1]], tag=FT["r1"], name="Outer Surface (4)")
+    volumePhysicalGroup = gmsh.model.addPhysicalGroup(dim=3, tags=[baseExtrusion[1][1]], tag=FT["volume"], name="Volume (5)")
     # += Create Mesh
     gmsh.model.mesh.generate(MESH_DIM)
     if refine_check == "True":
@@ -94,92 +96,107 @@ def main(test_name, test_type, test_order, refine_check):
     # +==+==+
     # Load Domain & Interpolation
     # += Read .msh into domain for FEniCSx
-    #    (1): File name .msh
-    #    (2): Multiprocessing assignment
-    #    (3): Rank of multiprocessing
-    #    (4): Dimension of mesh
     domain, _, facet_markers = io.gmshio.read_from_msh("gmsh_msh/" + test_name + ".msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
-    tdim = domain.topology.dim
-    fdim = tdim - 1
-    domain.topology.create_entities(fdim)
-    domain.topology.create_connectivity(fdim, tdim)
-    domain.topology.create_connectivity(tdim, fdim)
+    fdim = MESH_DIM-1
+    # += Assign facets for key surfaces
+    z0_facets = facet_markers.find(FT["z0"])
+    z1_facets = facet_markers.find(FT["z1"])
+    r0_facets = facet_markers.find(FT["r0"])
+    r1_facets = facet_markers.find(FT["r1"])
+    
     # += Create Vector Element
-    #    (1): Interpolation style
-    #    (2): Cell from mesh domain
-    #    (3): Degree of interpolation style
-    VE2 = ufl.VectorElement("Lagrange", domain.ufl_cell(), degree=2)  
-    FE1 = ufl.FiniteElement("Lagrange", domain.ufl_cell(), degree=1)  
-    # += Create Function Space
+    #    (1): Continuous lagrange interpolation of order 2 for geometry
+    VE2 = ufl.VectorElement("CG", domain.ufl_cell(), degree=2)  
+    # += Create Finite Element
+    #    (1): Continuous lagrange interpolation of order 1 for pressure
+    FE1 = ufl.FiniteElement("CG", domain.ufl_cell(), degree=1)  
+    # += Create Mixed Function Space
     #    (1): Mesh domain space
-    #    (2): Finite element setup
-    # += Find total Function Space which contains both interpolation schemes
+    #    (2): Mixed element space
     W = fem.FunctionSpace(domain, ufl.MixedElement([VE2, FE1]))
+    # += Create finite element function
     w = fem.Function(W)
-    # += Collapse into geometric space 
+    # += Extract geometry function space and corresponding subdomains
     V, _ = W.sub(0).collapse()
-    #    (1): x-subdomain
-    Vx, _ = V.sub(0).collapse()
-    #    (2): y-subdomain
-    Vy, _ = V.sub(1).collapse()
-    #    (3): z-subdomain
-    Vz, _ = V.sub(2).collapse()
+    Vx, _ = V.sub(X).collapse()
+    Vy, _ = V.sub(Y).collapse()
+    Vz, _ = V.sub(Z).collapse()
 
     # +==+==+
     # Determine Boundaries
     #    (1): Base
-    base_facets = mesh.locate_entities_boundary(domain, fdim, lambda x: np.isclose(x[2], 0))
-    #    (2): Top
-    top_facets = mesh.locate_entities_boundary(domain, fdim, lambda x: np.isclose(x[2], LEN_Z))
-    #    (3): Inner Cylinder Surface
-    def inner_bound(x):
-        return np.isclose(np.sqrt(x[0]**2+x[1]**2), R0)
-    inner_facets = mesh.locate_entities_boundary(domain, fdim, inner_bound)
-    #    (4): Outer Cylinder Surface
-    def outer_bound(x):
-        return np.isclose(np.sqrt(x[0]**2+x[1]**2), R1)
-    outer_facets = mesh.locate_entities_boundary(domain, fdim, outer_bound)
+    # base_facets = mesh.locate_entities_boundary(domain, fdim, lambda x: np.isclose(x[2], 0))
+    # #    (2): Top
+    # top_facets = mesh.locate_entities_boundary(domain, fdim, lambda x: np.isclose(x[2], LEN_Z))
+    # #    (3): Inner Cylinder Surface
+    # def inner_bound(x):
+    #     return np.isclose(np.sqrt(x[0]**2+x[1]**2), R0)
+    # inner_facets = mesh.locate_entities_boundary(domain, fdim, inner_bound)
+    # #    (4): Outer Cylinder Surface
+    # def outer_bound(x):
+    #     return np.isclose(np.sqrt(x[0]**2+x[1]**2), R1)
+    # outer_facets = mesh.locate_entities_boundary(domain, fdim, outer_bound)
+
     # += Collate Marked boundaries
-    marked_facets = np.hstack([base_facets, top_facets, inner_facets, outer_facets])
-    # += Assign boundaries IDs
+    marked_facets = np.hstack([z0_facets, z1_facets, r0_facets, r1_facets])
+    # += Assign boundaries IDs in stack
     marked_values = np.hstack([
-        np.full_like(base_facets, 1), 
-        np.full_like(top_facets, 2),
-        np.full_like(inner_facets, 3), 
-        np.full_like(outer_facets, 4)
+        np.full_like(z0_facets, FT["z0"]), 
+        np.full_like(z1_facets, FT["z1"]),
+        np.full_like(r0_facets, FT["r0"]), 
+        np.full_like(r1_facets, FT["r1"])
     ])
-    # += Sort and assign
+    # += Sort and assign all tags
     sorted_facets = np.argsort(marked_facets)
     facet_tag = mesh.meshtags(domain, fdim, marked_facets[sorted_facets], marked_values[sorted_facets])
 
     # +==+==+
-    # Boundary Conditions
-    # += Base Dirichlet BCs but broken per subspace
-    #    (1): Interpolation space
-    #    (2): Internal function to determine if on z = 0
-    base_dofs_x = fem.locate_dofs_topological((W.sub(0).sub(0), Vz), facet_tag.dim, facet_tag.find(1))
-    base_dofs_y = fem.locate_dofs_topological((W.sub(0).sub(1), Vz), facet_tag.dim, facet_tag.find(1))
-    base_dofs_z = fem.locate_dofs_topological((W.sub(0).sub(2), Vz), facet_tag.dim, facet_tag.find(1))
-    # += Set Dirichlet BCs of (1) on (2)
-    u0 = lambda x: np.full(x.shape[1], default_scalar_type(0.0))
+    # BC: Base [Z0]
+    # += Locate subdomain dofs
+    z0_dofs_x = fem.locate_dofs_topological((W.sub(0).sub(X), Vx), facet_tag.dim, z0_facets)
+    z0_dofs_y = fem.locate_dofs_topological((W.sub(0).sub(Y), Vy), facet_tag.dim, z0_facets)
+    z0_dofs_z = fem.locate_dofs_topological((W.sub(0).sub(Z), Vz), facet_tag.dim, z0_facets)
+    # += Set rules for interpolation
+    u0_x = lambda x: np.full(x.shape[1], default_scalar_type(0.0))
+    u0_y = lambda x: np.full(x.shape[1], default_scalar_type(0.0))
+    u0_z = lambda x: np.full(x.shape[1], default_scalar_type(0.0))
+    # += Interpolate 
     u0_bc_x = fem.Function(Vx)
-    u0_bc_x.interpolate(u0)
-    bc_base_x = fem.dirichletbc(u0_bc_x, base_dofs_x, W.sub(0).sub(0))
+    u0_bc_x.interpolate(u0_x)
     u0_bc_y = fem.Function(Vy)
-    u0_bc_y.interpolate(u0)
-    bc_base_y = fem.dirichletbc(u0_bc_y, base_dofs_y, W.sub(0).sub(1))
+    u0_bc_y.interpolate(u0_y)
     u0_bc_z = fem.Function(Vz)
-    u0_bc_z.interpolate(u0)
-    bc_base_z = fem.dirichletbc(u0_bc_z, base_dofs_z, W.sub(0).sub(2))
-    # += Top Dirichlet BCs
-    top_dofs_z = fem.locate_dofs_topological((W.sub(0).sub(2), Vz), facet_tag.dim, facet_tag.find(2))
-    # # += Set Dirichlet BCs of (1) on (2)
-    u1_bc = fem.Function(Vz)
-    u1 = lambda x: np.full(x.shape[1], default_scalar_type(0.0))
-    u1_bc.interpolate(u1)
-    bc_top_z = fem.dirichletbc(u1_bc, top_dofs_z, W.sub(0).sub(2))
-    # += Concatenate boundaries
-    # bc = [bc_base_x, bc_base_y, bc_base_z]
+    u0_bc_z.interpolate(u0_z)
+    # += Create Dirichlet over subdomains
+    bc_z0_x = fem.dirichletbc(u0_bc_x, z0_dofs_x, W.sub(0).sub(X))
+    bc_z0_y = fem.dirichletbc(u0_bc_y, z0_dofs_y, W.sub(0).sub(Y))
+    bc_z0_z = fem.dirichletbc(u0_bc_z, z0_dofs_z, W.sub(0).sub(Z))
+
+    # +==+==+
+    # BC: Top [Z1]
+    # += Locate subdomain dofs
+    z1_dofs_x = fem.locate_dofs_topological((W.sub(0).sub(X), Vx), facet_tag.dim, z1_facets)
+    z1_dofs_y = fem.locate_dofs_topological((W.sub(0).sub(Y), Vy), facet_tag.dim, z1_facets)
+    z1_dofs_z = fem.locate_dofs_topological((W.sub(0).sub(Z), Vz), facet_tag.dim, z1_facets)
+    # += Set rules for interpolation
+    u1_x = lambda x: np.full(x.shape[1], default_scalar_type(0.0))
+    u1_y = lambda x: np.full(x.shape[1], default_scalar_type(0.0))
+    u1_z = lambda x: np.full(x.shape[1], default_scalar_type(LAMBDA))
+    # += Interpolate 
+    u1_bc_x = fem.Function(Vx)
+    u1_bc_x.interpolate(u1_x)
+    u1_bc_y = fem.Function(Vy)
+    u1_bc_y.interpolate(u1_y)
+    u1_bc_z = fem.Function(Vz)
+    u1_bc_z.interpolate(u1_z)
+    # += Create Dirichlet over subdomains
+    bc_z1_x = fem.dirichletbc(u1_bc_x, z1_dofs_x, W.sub(0).sub(X))
+    bc_z1_y = fem.dirichletbc(u1_bc_y, z1_dofs_y, W.sub(0).sub(Y))
+    bc_z1_z = fem.dirichletbc(u1_bc_z, z1_dofs_z, W.sub(0).sub(Z))
+
+    # +==+==+
+    # Concatenate BCs
+    bc = [bc_z0_x, bc_z0_y, bc_z0_z, bc_z1_x, bc_z1_y, bc_z1_z]
 
     # # +==+==+ 
     # # Pressure Setup
@@ -226,9 +243,9 @@ def main(test_name, test_type, test_order, refine_check):
     ds = ufl.Measure('ds', domain=domain, subdomain_data=facet_tag, metadata=metadata)
     dx = ufl.Measure("dx", domain=domain, metadata=metadata)
     # += Residual Equation (Variational, for solving)
-    R = ufl.inner(ufl.grad(v), firstPK) * dx + q * (J - 1) * dx \
-        - ufl.inner(p_inner * n, v) * ds(2) \
-        - ufl.inner(p_outer * n, v) * ds(1) #- p_inner * J * ufl.dot(ufl.inv(F).T * n, v) * ds(3)
+    R = ufl.inner(ufl.grad(v), firstPK) * dx + q * (J - 1) * dx 
+        # - ufl.inner(p_inner * n, v) * ds(2) \
+        # - ufl.inner(p_outer * n, v) * ds(1) #- p_inner * J * ufl.dot(ufl.inv(F).T * n, v) * ds(3)
     problem = NonlinearProblem(R, w, bc)
     solver = NewtonSolver(domain.comm, problem)
     # += Tolerances for convergence
@@ -250,9 +267,9 @@ def main(test_name, test_type, test_order, refine_check):
         vtx.write(0.0)
         vtx.close()
 
-    with io.VTXWriter(MPI.COMM_WORLD, test_name + "pressure.bp", w.sub(1).collapse(), engine="BP4") as vtx:
-        vtx.write(0.0)
-        vtx.close()
+    # with io.VTXWriter(MPI.COMM_WORLD, test_name + "pressure.bp", w.sub(1).collapse(), engine="BP4") as vtx:
+    #     vtx.write(0.0)
+    #     vtx.close()
 
 # +==+==+
 # Main check for script operation.
