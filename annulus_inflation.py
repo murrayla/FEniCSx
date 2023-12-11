@@ -20,7 +20,7 @@ from numpy import linalg as LNG
 from mpi4py import MPI
 import numpy as np
 import argparse
-import meshio
+import math
 import gmsh
 import ufl
 # += Parameters
@@ -28,9 +28,10 @@ MESH_DIM = 3
 LEN_Z = 1
 R0 = 1
 R1 = 1.5
-P_INNER = -15
+P_INNER = -150
 P_OUTER = 0
 LAMBDA = 0.2 * LEN_Z
+ROT_RAD = math.pi/6
 FT = {"z0": 1, "z1": 2, "r0": 3, "r1": 4, "volume": 5}
 X, Y, Z = 0, 1, 2
 
@@ -135,6 +136,14 @@ def main(test_name, test_type, test_order, refine_check):
     sorted_facets = np.argsort(marked_facets)
     facet_tag = mesh.meshtags(domain, fdim, marked_facets[sorted_facets], marked_values[sorted_facets])
 
+    def rot_x(x):
+        rot = x[0]*math.cos(ROT_RAD) - x[1]*math.sin(ROT_RAD)
+        return rot - x[0]
+    
+    def rot_y(x):
+        rot = x[0]*math.sin(ROT_RAD) + x[1]*math.cos(ROT_RAD) 
+        return rot - x[1]
+
     # +==+==+
     # BC: Base [Z0]
     # += Locate subdomain dofs
@@ -160,12 +169,13 @@ def main(test_name, test_type, test_order, refine_check):
     # +==+==+
     # BC: Top [Z1]
     # += Locate subdomain dofs
+    # z1_dof = fem.locate_dofs_topological((W.sub(0), V), facet_tag.dim, z1_facets)
     z1_dofs_x = fem.locate_dofs_topological((W.sub(0).sub(X), Vx), facet_tag.dim, z1_facets)
     z1_dofs_y = fem.locate_dofs_topological((W.sub(0).sub(Y), Vy), facet_tag.dim, z1_facets)
     z1_dofs_z = fem.locate_dofs_topological((W.sub(0).sub(Z), Vz), facet_tag.dim, z1_facets)
     # += Set rules for interpolation
-    u1_x = lambda x: np.full(x.shape[1], default_scalar_type(0.0))
-    u1_y = lambda x: np.full(x.shape[1], default_scalar_type(0.0))
+    u1_x = rot_x 
+    u1_y = rot_y 
     u1_z = lambda x: np.full(x.shape[1], default_scalar_type(LAMBDA))
     # += Interpolate 
     u1_bc_x = fem.Function(Vx)
