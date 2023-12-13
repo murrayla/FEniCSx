@@ -16,8 +16,10 @@
 from dolfinx import mesh, fem, io, default_scalar_type
 from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
+from generateMesh import annulus
 from numpy import linalg as LNG
 from mpi4py import MPI
+import matplotlib.pyplot as plt
 import numpy as np
 import argparse
 import math
@@ -51,6 +53,10 @@ def gen_annulus(test_name, test_type, test_order, refine_check):
     # +==+==+
     # Initialise and begin geometry
     gmsh.initialize()
+    if test_type == "Hexa":
+        gmsh.option.setNumber("Mesh.CharacteristicLengthMin", 5)
+        gmsh.option.setNumber("Mesh.CharacteristicLengthMax", 5)
+        gmsh.option.setNumber("Mesh.RecombineAll", 1)
     gmsh.model.add(test_name)
     # += Setup base of annulus, surface
     innerCircle = gmsh.model.occ.addCircle(x=0, y=0, z=0, r=R0, tag=FT["r0"])
@@ -72,10 +78,34 @@ def gen_annulus(test_name, test_type, test_order, refine_check):
     gmsh.model.mesh.generate(MESH_DIM)
     if refine_check == "True":
         gmsh.model.mesh.refine()
+    
     gmsh.model.mesh.setOrder(test_order)
     # += Write File
     gmsh.write("gmsh_msh/" + test_name + ".msh")
     gmsh.finalize()
+
+def plot_vals():
+    fig, ax = plt.subplots(3, 2)
+    # += Plot 1
+    ax[0, 0].set_title('(a) $\\sigma^{(rr)}$')
+    ax[0, 0].set(xlabel='Underformed Radial Position \n (\% of wall thickness)', ylabel='Stress (kPA)')
+    # += Plot 2
+    ax[0, 1].set_title('(b) $\\sigma^{(\\theta \\theta)}$')
+    ax[0, 1].set(xlabel='Underformed Radial Position \n (\% of wall thickness)', ylabel='Stress (kPA)')
+    # += Plot 3
+    ax[1, 0].set_title('(c) $\\sigma^{(\\theta r)}$')
+    ax[1, 0].set(xlabel='Underformed Radial Position \n (\% of wall thickness)', ylabel='Stress (kPA)')
+    # += Plot 4
+    ax[1, 1].set_title('(d) $\\sigma^{(zz)}$')
+    ax[1, 1].set(xlabel='Underformed Radial Position \n (\% of wall thickness)', ylabel='Stress (kPA)')
+    # += Plot 5
+    ax[2, 0].set_title('(e) Hydrostatic Pressure')
+    ax[2, 0].set(xlabel='Underformed Radial Position \n (\% of wall thickness)', ylabel='(kPA)')
+    # += Plot 6
+    ax[2, 1].set_title('(f) $I_{3}$')
+    ax[2, 1].set(xlabel='Underformed Radial Position \n (\% of wall thickness)')
+    
+    plt.show()
 
 # +==+==+==+
 # main Function 
@@ -92,12 +122,28 @@ def gen_annulus(test_name, test_type, test_order, refine_check):
 def main(test_name, test_type, test_order, refine_check):
     # +==+==+
     # Mesh Generation
-    # gen_annulus(test_name, test_type, test_order, refine_check)
+    if test_type == 0 or test_type == 1:
+        gen_annulus(test_name, test_type, test_order, refine_check)
+    elif test_type == 2:
+        ref_l = [[1,4,1],[1,8,1],[2,4,1],[2,8,1],[2,8,2],[4,16,2],[4,16,8],[4,32,16],[8,64,16]]
+        l = 0
+        node_list, e_assign = annulus(R0, R1, LEN_Z, ref_l[l][0], ref_l[l][1], ref_l[l][2], test_order)
+        hexa_points = np.array(node_list, dtype=np.float64)
+        hexahedral = np.array(e_assign, dtype=np.int64)
+        hexahedral -= hexahedral
+        print(hexa_points)
+        print(hexahedral)
 
     # +==+==+
     # Load Domain & Interpolation
     # += Read .msh into domain for FEniCSx
-    domain, _, facet_markers = io.gmshio.read_from_msh("gmsh_msh/" + test_name + ".msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
+    if test_type == 0 or test_type == 1:
+        domain, _, facet_markers = io.gmshio.read_from_msh("gmsh_msh/" + test_name + ".msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
+    elif test_type == 2:
+        domain = ufl.Mesh(ufl.VectorElement("CG", ufl.hexahedron, test_order))
+        gen_mesh = mesh.create_mesh(MPI.COMM_WORLD, hexahedral, hexa_points, domain)
+        print(okay)
+
     fdim = MESH_DIM-1
     # += Assign facets for key surfaces
     z0_facets = facet_markers.find(FT["z0"])
@@ -262,32 +308,30 @@ def main(test_name, test_type, test_order, refine_check):
         vtx.write(0.0)
         vtx.close()
 
-    # with io.VTXWriter(MPI.COMM_WORLD, test_name + "pressure.bp", w.sub(1).collapse(), engine="BP4") as vtx:
-    #     vtx.write(0.0)
-    #     vtx.close()
+    r = ufl.SpatialCoordinate(domain)
+    theta = ufl.SpatialCoordinate(domain)
+    sigma_rr = ufl.dot(r, p_sol*r) / ufl.dot(r,r)
+    print(sigma_rr)
+    # plot_vals()
 
 # +==+==+
 # Main check for script operation.
 #   Will operate argparse to take values from terminal. 
 #   Then runs main() program for script execution 
 if __name__ == '__main__':
-    
-    # +==+ Intake Arguments
-    argparser = argparse.ArgumentParser("FEniCSz Program for Passive Annulus Inflation")
-    # += Name for file writing
-    argparser.add_argument("test_ID")
-    # += Type of generation, i.e. Tetrahedral or Hexagonal
-    argparser.add_argument("gen_type")
-    # += Order of generated mesh
-    argparser.add_argument("gen_order", type=int)
-    # += Refinement level
-    argparser.add_argument("refinement", type=bool)
-    # += Capture arguments and store accordingly
-    args = argparser.parse_args()
-    test_name = args.test_ID
-    test_type = args.gen_type
-    test_order = args.gen_order
-    refine_check = args.refinement
+    # +==+ Input Parameters
+    # += Test name
+    test_name = "genAnnulus"
+    # += Type of element generation
+    #    0: gmsh Tetrahedron
+    #    1: gmsh Hexahedron
+    #    2: manual Hexahedron 
+    #   >2: No generation
+    test_type = 2
+    # += Element Order (interpolation)
+    test_order = 2
+    # += Refinement style
+    refine_check = True
 
     # +==+ Feed Main()
     main(test_name, test_type, test_order, refine_check)
