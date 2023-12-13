@@ -37,6 +37,29 @@ ROT_RAD = math.pi/6
 FT = {"z0": 1, "z1": 2, "r0": 3, "r1": 4, "volume": 5}
 X, Y, Z = 0, 1, 2
 
+# Gmsh Numbering for Hexa-27
+#   *  z = 0           z = 0.5         z = 1    
+#   *  3--13--2     * 15--24--14    *  7--19--6      
+#   *  |      |     *  |      |     *  |      |       
+#   *  9  20  11    * 22  26  23    * 17  25  18     
+#   *  |      |     *  |      |     *  |      |     
+#   *  0-- 8--1     * 10--21--12    *  4--16--5   
+# 
+# Vijay Numbering for Hexa-27
+#   *  z = 0           z = 0.5         z = 1    
+#   *  0-- 9--18    *  1--10--19    *  2--11--20     
+#   *  |      |     *  |      |     *  |      |       
+#   *  3  12  21    *  4  13  22    *  5  14  23     
+#   *  |      |     *  |      |     *  |      |     
+#   *  6--15--24    *  7--16--25    *  8--17--26     
+# 
+GEN2MSH = [
+    6, 24, 18, 0, 8, 26, 20, 2, 
+    15, 3, 7, 21, 25, 9, 19, 1,
+    17, 5, 23, 11, 12, 16, 4, 22, 10,
+    14, 13
+]  
+
 # +==+==+==+
 # gen_annulus Function 
 # Description:
@@ -129,10 +152,8 @@ def main(test_name, test_type, test_order, refine_check):
         l = 0
         node_list, e_assign = annulus(R0, R1, LEN_Z, ref_l[l][0], ref_l[l][1], ref_l[l][2], test_order)
         hexa_points = np.array(node_list, dtype=np.float64)
-        hexahedral = np.array(e_assign, dtype=np.int64)
-        hexahedral -= hexahedral
-        print(hexa_points)
-        print(hexahedral)
+        hexahedrals = np.array(e_assign[:, GEN2MSH], dtype=np.int64)
+        
 
     # +==+==+
     # Load Domain & Interpolation
@@ -140,9 +161,10 @@ def main(test_name, test_type, test_order, refine_check):
     if test_type == 0 or test_type == 1:
         domain, _, facet_markers = io.gmshio.read_from_msh("gmsh_msh/" + test_name + ".msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
     elif test_type == 2:
-        domain = ufl.Mesh(ufl.VectorElement("CG", ufl.hexahedron, test_order))
-        gen_mesh = mesh.create_mesh(MPI.COMM_WORLD, hexahedral, hexa_points, domain)
-        print(okay)
+        domain = ufl.Mesh(ufl.VectorElement("CG", ufl.hexahedron, 2))
+        quad_mesh = mesh.create_mesh(
+            MPI.COMM_WORLD, hexahedrals, hexa_points, domain
+        )
 
     fdim = MESH_DIM-1
     # += Assign facets for key surfaces

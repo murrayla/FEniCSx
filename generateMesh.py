@@ -138,7 +138,7 @@ def annulus(r_inner,r_outer,z_length,numberOfRadialElements,numberOfCircumferent
             for k in range(0, zidx_end, 2):
                 if i+3 > ridx_end or j+3 > thetaidx_end or k+3 > zidx_end:
                     continue
-                e_assign[e, :] = node_map[i:(i+3), j:(j+3), k:(k+3)].flatten()
+                e_assign[e, :] = node_map[i:(i+3), j:(j+3), k:(k+3)].flatten() - 1
                 e += 1
 
     print('Total elements in mesh=',len(e_assign))
