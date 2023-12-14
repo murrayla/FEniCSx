@@ -27,37 +27,48 @@ import gmsh
 import ufl
 # += Parameters
 MESH_DIM = 3
+FACE_DIM = MESH_DIM-1
 LEN_Z = 1
 R0 = 1
 R1 = 1.5
-P_INNER = -150
+P_INNER = -15
 P_OUTER = 0
 LAMBDA = 0.2 * LEN_Z
-ROT_RAD = math.pi/6
+ROT_RAD = 0 #math.pi/6
 FT = {"z0": 1, "z1": 2, "r0": 3, "r1": 4, "volume": 5}
 X, Y, Z = 0, 1, 2
 
-# Gmsh Numbering for Hexa-27
+# Basix Numbering for Hexa-27
 #   *  z = 0           z = 0.5         z = 1    
-#   *  3--13--2     * 15--24--14    *  7--19--6      
+#   *  2--13--3     * 14--24--15    *  6--19--7      
 #   *  |      |     *  |      |     *  |      |       
-#   *  9  20  11    * 22  26  23    * 17  25  18     
-#   *  |      |     *  |      |     *  |      |     
-#   *  0-- 8--1     * 10--21--12    *  4--16--5   
+#   *  9  20  11    * 22  26  23    * 17  25  18  y   
+#   *  |      |     *  |      |     *  |      |   ^  
+#   *  0-- 8--1     * 10--21--12    *  4--16--5      >x
 # 
-# Vijay Numbering for Hexa-27
+# Gen Numbering for Hexa-27
 #   *  z = 0           z = 0.5         z = 1    
 #   *  0-- 9--18    *  1--10--19    *  2--11--20     
 #   *  |      |     *  |      |     *  |      |       
-#   *  3  12  21    *  4  13  22    *  5  14  23     
-#   *  |      |     *  |      |     *  |      |     
-#   *  6--15--24    *  7--16--25    *  8--17--26     
-# 
+#   *  3  12  21    *  4  13  22    *  5  14  23  y    
+#   *  |      |     *  |      |     *  |      |   ^     
+#   *  6--15--24    *  7--16--25    *  8--17--26     >x
+
+# GEN2MSH = [
+#     6, 24, 18, 0, 8, 26, 20, 2, 
+#     15, 3, 7, 21, 25, 9, 19, 1,
+#     17, 5, 23, 11, 12, 16, 4, 22, 10,
+#     14, 13
+# ]  
+
 GEN2MSH = [
-    6, 24, 18, 0, 8, 26, 20, 2, 
-    15, 3, 7, 21, 25, 9, 19, 1,
-    17, 5, 23, 11, 12, 16, 4, 22, 10,
-    14, 13
+    6, 24, 0, 18, 
+    8, 26, 2, 20, 
+    15, 3, 7, 21, 
+    25, 9, 1, 19,
+    17, 5, 23, 11,
+    12, 16, 4, 22, 10, 14,
+    13
 ]  
 
 # +==+==+==+
@@ -154,35 +165,59 @@ def main(test_name, test_type, test_order, refine_check):
         hexa_points = np.array(node_list, dtype=np.float64)
         hexahedrals = np.array(e_assign[:, GEN2MSH], dtype=np.int64)
         
-
     # +==+==+
-    # Load Domain & Interpolation
+    # Domain & Interpolation
     # += Read .msh into domain for FEniCSx
     if test_type == 0 or test_type == 1:
         domain, _, facet_markers = io.gmshio.read_from_msh("gmsh_msh/" + test_name + ".msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
     elif test_type == 2:
-        domain = ufl.Mesh(ufl.VectorElement("CG", ufl.hexahedron, 2))
-        quad_mesh = mesh.create_mesh(
-            MPI.COMM_WORLD, hexahedrals, hexa_points, domain
-        )
+        domain = ufl.Mesh(ufl.VectorElement("CG", ufl.hexahedron, test_order))
+        hexa_mesh = mesh.create_mesh(MPI.COMM_WORLD, hexahedrals, hexa_points, domain)
 
-    fdim = MESH_DIM-1
-    # += Assign facets for key surfaces
-    z0_facets = facet_markers.find(FT["z0"])
-    z1_facets = facet_markers.find(FT["z1"])
-    r0_facets = facet_markers.find(FT["r0"])
-    r1_facets = facet_markers.find(FT["r1"])
+    # +==+==+
+    # Facet Assignment
+    if test_type == 2:
+        def inner_rad(x):
+            r = np.sum(np.abs(x[:2])**2,axis=0)**(1./2)
+            return np.isclose(r, R0)
+        def outer_rad(x):
+            r = np.sum(np.abs(x[:2])**2,axis=0)**(1./2)
+            return np.isclose(r, R1)
+        z0_facets = mesh.locate_entities_boundary(hexa_mesh, FACE_DIM, lambda x: np.isclose(x[2], 0))
+        z1_facets = mesh.locate_entities_boundary(hexa_mesh, FACE_DIM, lambda x: np.isclose(x[2], LEN_Z))
+        r0_facets = mesh.locate_entities_boundary(hexa_mesh, FACE_DIM, inner_rad)
+        r1_facets = mesh.locate_entities_boundary(hexa_mesh, FACE_DIM, outer_rad)
+    else: 
+        z0_facets = facet_markers.find(FT["z0"])
+        z1_facets = facet_markers.find(FT["z1"])
+        r0_facets = facet_markers.find(FT["r0"])
+        r1_facets = facet_markers.find(FT["r1"])
+
+    # +==+==+
+    # Mixed Element Setup
+    if test_type == 2:
+        # += Create Vector Element
+        #    (1): Continuous lagrange interpolation of order 2 for geometry
+        VE2 = ufl.VectorElement("CG", ufl.hexahedron, degree=test_order)  
+        # += Create Finite Element
+        #    (1): Continuous lagrange interpolation of order 1 for pressure
+        FE1 = ufl.FiniteElement("CG", ufl.hexahedron, degree=test_order-1)  
+        # += Create Mixed Function Space
+        #    (1): Mesh domain space
+        #    (2): Mixed element space
+        W = fem.FunctionSpace(hexa_mesh, ufl.MixedElement([VE2, FE1]))
+    else:
+        # += Create Vector Element
+        #    (1): Continuous lagrange interpolation of order 2 for geometry
+        VE2 = ufl.VectorElement("CG", domain.ufl_cell(), degree=test_order)  
+        # += Create Finite Element
+        #    (1): Continuous lagrange interpolation of order 1 for pressure
+        FE1 = ufl.FiniteElement("CG", domain.ufl_cell(), degree=test_order-1)  
+        # += Create Mixed Function Space
+        #    (1): Mesh domain space
+        #    (2): Mixed element space
+        W = fem.FunctionSpace(domain, ufl.MixedElement([VE2, FE1]))
     
-    # += Create Vector Element
-    #    (1): Continuous lagrange interpolation of order 2 for geometry
-    VE2 = ufl.VectorElement("CG", domain.ufl_cell(), degree=2)  
-    # += Create Finite Element
-    #    (1): Continuous lagrange interpolation of order 1 for pressure
-    FE1 = ufl.FiniteElement("CG", domain.ufl_cell(), degree=1)  
-    # += Create Mixed Function Space
-    #    (1): Mesh domain space
-    #    (2): Mixed element space
-    W = fem.FunctionSpace(domain, ufl.MixedElement([VE2, FE1]))
     # += Create finite element function
     w = fem.Function(W)
     # += Extract geometry function space and corresponding subdomains
@@ -202,7 +237,10 @@ def main(test_name, test_type, test_order, refine_check):
     ])
     # += Sort and assign all tags
     sorted_facets = np.argsort(marked_facets)
-    facet_tag = mesh.meshtags(domain, fdim, marked_facets[sorted_facets], marked_values[sorted_facets])
+    if test_type == 2:
+        facet_tag = mesh.meshtags(hexa_mesh, FACE_DIM, marked_facets[sorted_facets], marked_values[sorted_facets])
+    else:
+        facet_tag = mesh.meshtags(domain, FACE_DIM, marked_facets[sorted_facets], marked_values[sorted_facets])
 
     def rot_x(x):
         rot = x[0]*math.cos(ROT_RAD) - x[1]*math.sin(ROT_RAD)
@@ -310,7 +348,10 @@ def main(test_name, test_type, test_order, refine_check):
         - p_inner * ufl.inner(n, v) * ds(3) \
         - p_outer * ufl.inner(n, v) * ds(4) 
     problem = NonlinearProblem(R, w, bc)
-    solver = NewtonSolver(domain.comm, problem)
+    if test_type == 2:
+        solver = NewtonSolver(hexa_mesh.comm, problem)
+    else:
+        solver = NewtonSolver(domain.comm, problem)
     # += Tolerances for convergence
     solver.atol = 1e-8
     solver.rtol = 1e-8
@@ -330,11 +371,11 @@ def main(test_name, test_type, test_order, refine_check):
         vtx.write(0.0)
         vtx.close()
 
-    r = ufl.SpatialCoordinate(domain)
-    theta = ufl.SpatialCoordinate(domain)
-    sigma_rr = ufl.dot(r, p_sol*r) / ufl.dot(r,r)
-    print(sigma_rr)
-    # plot_vals()
+    # r = ufl.SpatialCoordinate(domain)
+    # theta = ufl.SpatialCoordinate(domain)
+    # sigma_rr = ufl.dot(r, p_sol*r) / ufl.dot(r,r)
+    # print(sigma_rr)
+    # # plot_vals()
 
 # +==+==+
 # Main check for script operation.
