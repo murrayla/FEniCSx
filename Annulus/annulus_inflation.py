@@ -22,6 +22,7 @@ from mpi4py import MPI
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse
+import basix
 import math
 import gmsh
 import ufl
@@ -31,9 +32,9 @@ FACE_DIM = MESH_DIM-1
 LEN_Z = 1
 R0 = 1
 R1 = 1.5
-P_INNER = -15
+P_INNER = -0
 P_OUTER = 0
-LAMBDA = 0.2 * LEN_Z
+LAMBDA = 0.0 * LEN_Z
 ROT_RAD = 0 #math.pi/6
 FT = {"z0": 1, "z1": 2, "r0": 3, "r1": 4, "volume": 5}
 X, Y, Z = 0, 1, 2
@@ -335,6 +336,7 @@ def main(test_name, test_type, test_order, refine_check):
     gamma2 = -ufl.diff(psi, IIc)
     # += First Piola Stress
     firstPK = 2 * F * (gamma1*I + gamma2*C) + p * J * ufl.inv(F).T
+    cau = (1/J * firstPK * F).T
 
     # +==+==+
     # Setup Variational Problem Solver
@@ -371,11 +373,32 @@ def main(test_name, test_type, test_order, refine_check):
         vtx.write(0.0)
         vtx.close()
 
-    # r = ufl.SpatialCoordinate(domain)
-    # theta = ufl.SpatialCoordinate(domain)
-    # sigma_rr = ufl.dot(r, p_sol*r) / ufl.dot(r,r)
-    # print(sigma_rr)
-    # # plot_vals()
+    r_inc = np.linspace(R0, R1, 10)
+    r = ufl.SpatialCoordinate(hexa_mesh)
+    Vr = fem.FunctionSpace(hexa_mesh, ufl.FiniteElement("CG", ufl.hexahedron, 3))
+    s = u_sol
+    cau_expr = fem.Expression(s, Vr.element.interpolation_points())
+    stress = fem.Function(Vr)
+    stress.interpolate(cau_expr)
+    print(okay)
+
+    quadrature_degree = 4
+    Vq = fem.FunctionSpace(hexa_mesh, ufl.FiniteElement(
+        "Quadrature", ufl.hexahedron, quadrature_degree, quad_scheme="default"))
+    quadrature_points, wts = basix.make_quadrature(
+        basix.cell.string_to_type(hexa_mesh.topology.cell_name()), quadrature_degree)
+    x = ufl.SpatialCoordinate(hexa_mesh)
+    x_expr = fem.Expression(x, quadrature_points)
+    detJ = fem.Expression(ufl.JacobianDeterminant(hexa_mesh), quadrature_points)
+    quads = []
+    for i in range(hexa_mesh.topology.index_map(3).size_local):
+        quads.append(x_expr.eval(mesh=hexa_mesh, cells=[i])[0])
+
+    Vs = fem.TensorFunctionSpace()
+    cau_expr = fem.Expression(cau, quadrature_points)
+    stresses = fem.Function(Vq)
+    stresses.interpolate(cau_expr)
+    print(cau_expr)
 
 # +==+==+
 # Main check for script operation.
