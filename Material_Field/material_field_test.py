@@ -23,8 +23,8 @@ import ufl
 # += Parameters
 MESH_DIM = 2
 X, Y = 0, 1
-X_ELS = 5
-Y_ELS = 5
+X_ELS = 1
+Y_ELS = 1
 LAMBDA = 0.05 # 5% Contraction
 FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "area": 5}
 
@@ -43,7 +43,7 @@ def main(test_name, elem_order):
     #    (2): Pressure space definition
     #    (2): Mixed function space for interpolation
     #    (3): Function for solving within space | displacement and hydrostatic pressure
-    domain = mesh.create_unit_square(comm=MPI.COMM_WORLD, nx=X_ELS, ny=Y_ELS)
+    domain = mesh.create_unit_square(comm=MPI.COMM_WORLD, nx=X_ELS, ny=Y_ELS, cell_type=mesh.CellType.quadrilateral)
     Ve = ufl.VectorElement(family="CG", cell=domain.ufl_cell(), degree=elem_order)
     Vp = ufl.FiniteElement("CG", domain.ufl_cell(), degree=elem_order-1)  
     W = fem.FunctionSpace(domain, ufl.MixedElement([Ve, Vp]))
