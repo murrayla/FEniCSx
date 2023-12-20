@@ -18,6 +18,7 @@ from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
 from mpi4py import MPI
 import numpy as np
+import math
 import basix
 import ufl
 # += Parameters
@@ -26,6 +27,7 @@ X, Y = 0, 1
 X_ELS = 1
 Y_ELS = 1
 LAMBDA = 0.05 # 5% Contraction
+MAT_FIELD = math.pi/4
 FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "area": 5}
 
 # +==+==+==+
@@ -80,6 +82,26 @@ def main(test_name, elem_order):
     ft = mesh.meshtags(mesh=domain, dim=fdim, entities=mfacets[sfacets], values=mvalues[sfacets])
 
     # +==+==+
+    # Metric Tensors
+    x_cart = ufl.SpatialCoordinate(domain)
+    x_curv = x_cart[0]*math.cos(MAT_FIELD) + x_cart[1]*math.sin(MAT_FIELD)
+    y_curv = -x_cart[0]*math.sin(MAT_FIELD) + x_cart[1]*math.cos(MAT_FIELD)
+    i, j = ufl.indices(MESH_DIM)
+    e_tild_1 = ufl.as_vector([math.cos(MAT_FIELD), math.sin(MAT_FIELD)])
+    e_tild_2 = ufl.as_vector([-math.sin(MAT_FIELD), math.cos(MAT_FIELD)])
+    G = ufl.as_tensor([
+        [ufl.inner(e_tild_1, e_tild_1), ufl.inner(e_tild_1, e_tild_2)], 
+        [ufl.inner(e_tild_2, e_tild_1), ufl.inner(e_tild_2, e_tild_2)]
+    ])
+    Ginv = ufl.inv(G)
+    Push = ufl.as_matrix([
+        [math.cos(MAT_FIELD), math.sin(MAT_FIELD)], 
+        [-math.sin(MAT_FIELD), math.cos(MAT_FIELD)]
+    ])
+    Pull = ufl.inv(Push)
+    print(G)
+
+    # +==+==+
     # BC: Base [x0]
     # += Locate subdomain dofs
     x0_dofs_x = fem.locate_dofs_topological((W.sub(0).sub(X), Vx), ft.dim, x0_facets)
@@ -121,22 +143,41 @@ def main(test_name, elem_order):
     #    (2): Right Cauchy-Green Tensor
     #         (0): Invariants, Ic, IIc, J
     I = ufl.variable(ufl.Identity(MESH_DIM))
-    F = ufl.variable(I + ufl.grad(u))
+    F = Push * Push * ufl.variable(I + ufl.grad(u))
     C = ufl.variable(F.T * F)
     Ic = ufl.variable(ufl.tr(C))
     IIc = ufl.variable((Ic**2 - ufl.inner(C,C))/2)
     J = ufl.variable(ufl.det(F))
+
+    c = 0.8
+    bf = 10
+    bt = 2
+    bfs = 0.2
+    E = ufl.as_tensor(0.5*(C-I))
+    Q = bf * E[0,0]**2 + bt * E[1,1]**2 + bfs * (E[0,1]**2 + E[1,0]**2)
+    psi = c/2 * (ufl.exp(Q) - 1)
+    T = ufl.as_tensor([
+        [
+            0.5 * (c/2 * ufl.exp(Q) * 2*bf*E[0,0] + c/2 * ufl.exp(Q) * 2*bf*E[0,0]) - p,
+            0.5 * (c/2 * ufl.exp(Q) * 2*bfs*E[0,1] + c/2 * ufl.exp(Q) * 2*bfs*E[1,0])
+        ],
+        [
+            0.5 * (c/2 * ufl.exp(Q) * 2*bfs*E[1,0] + c/2 * ufl.exp(Q) * 2*bfs*E[0,1]),
+            0.5 * (c/2 * ufl.exp(Q) * 2*bt*E[1,1] + c/2 * ufl.exp(Q) * 2*bt*E[1,1]) - p
+        ]
+    ])
+    fPK = T * F.T
     # += Material Setup | Mooney-Rivlin
     #    (0): Constants
     #    (1): Strain Density Function
     #    (2): Chain Rule Differentiation Terms
     #    (3): First Piola-Kirchoff Stress
-    c1 = 2
-    c2 = 6
-    psi = c1 * (Ic - 3) + c2 *(IIc - 3) 
-    term1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
-    term2 = -ufl.diff(psi, IIc)
-    fPK = 2 * F * (term1*I + term2*C) + p * J * ufl.inv(F).T
+    # c1 = 2
+    # c2 = 6
+    # psi = c1 * (Ic - 3) + c2 *(IIc - 3) 
+    # term1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
+    # term2 = -ufl.diff(psi, IIc)
+    # fPK = 2 * F * (term1*I + term2*C) + p * J * ufl.inv(F).T
     
     # +==+==+
     # Problem Solver
