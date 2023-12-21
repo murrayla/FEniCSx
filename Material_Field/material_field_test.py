@@ -56,8 +56,8 @@ def main(test_name, elem_order):
     #    (0): Element domain for displacement
     #    (1): Subdomains of element for each component
     V, _ = W.sub(0).collapse()
-    Vx, _ = V.sub(X).collapse()
-    Vy, _ = V.sub(Y).collapse()
+    Vx, dofsX = V.sub(X).collapse()
+    Vy, dofsY = V.sub(Y).collapse()
 
     # +==+==+
     # Facet assignment
@@ -121,6 +121,7 @@ def main(test_name, elem_order):
     # +==+==+
     # Metric Tensors
     CART = ufl.SpatialCoordinate(domain)
+
     Push = ufl.as_matrix([
         [math.cos(ROT), -math.sin(ROT)], 
         [math.sin(ROT), math.cos(ROT)]
@@ -128,6 +129,20 @@ def main(test_name, elem_order):
     Pull = ufl.inv(Push)
     CURV = ufl.variable(Pull * CART)
     G = ufl.as_tensor([[1, 0], [0, 1]])
+
+    x_til = fem.Function(Vx)
+    y_til = fem.Function(Vx)
+
+    class affine:
+        def tranx(x):
+            x_tild = np.full(x.shape[1], default_scalar_type(math.cos(ROT)*x[0] + math.sin(ROT)*x[1]))
+            return x_tild
+        def trany(x):
+            y_tild = np.full(x.shape[1], default_scalar_type(-math.sin(ROT)*x[0] + math.cos(ROT)*x[1]))
+            return y_tild
+
+    x_til.interpolate(affine.tranx)
+    y_til.interpolate(affine.trany)
 
     x_cart = ufl.variable(CART[0] + u[0])
     y_cart = ufl.variable(CART[1] + u[1])
@@ -192,6 +207,7 @@ def main(test_name, elem_order):
     # term1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
     # term2 = -ufl.diff(psi, IIc)
     # fPK = 2 * F * (term1*I + term2*C) + p * J * ufl.inv(F).T
+    n = ufl.FacetNormal(domain)
     
     # +==+==+
     # Problem Solver
@@ -202,7 +218,7 @@ def main(test_name, elem_order):
     metadata = {"quadrature_degree": 2}
     ds = ufl.Measure('ds', domain=domain, subdomain_data=ft, metadata=metadata)
     dx = ufl.Measure("dx", domain=domain, metadata=metadata)
-    R = ufl.inner(ufl.grad(v), fPK) * dx + q * (J - 1) * dx 
+    R = ufl.inner(ufl.grad(ufl.grad(v)) + ufl.grad(v), F * fPK) * dx + q * (J - 1) * dx 
     # += Nonlinear Solver
     #    (0): Definition
     #    (1): Newton Iterator
@@ -229,6 +245,8 @@ def main(test_name, elem_order):
     with io.VTXWriter(MPI.COMM_WORLD, test_name + ".bp", w.sub(0).collapse(), engine="BP4") as vtx:
         vtx.write(0.0)
         vtx.close()
+
+    print(u_sol.x.array[dofsX])
     
 # +==+==+
 # Main check for script operation.
