@@ -26,8 +26,8 @@ MESH_DIM = 2
 X, Y = 0, 1
 X_ELS = 1
 Y_ELS = 1
-LAMBDA = 0.05 # 5% Contraction
-MAT_FIELD = math.pi/4
+LAMBDA = 0.01 # 5% Contraction
+ROT = 0#math.pi/4
 FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "area": 5}
 
 # +==+==+==+
@@ -82,26 +82,6 @@ def main(test_name, elem_order):
     ft = mesh.meshtags(mesh=domain, dim=fdim, entities=mfacets[sfacets], values=mvalues[sfacets])
 
     # +==+==+
-    # Metric Tensors
-    x_cart = ufl.SpatialCoordinate(domain)
-    x_curv = x_cart[0]*math.cos(MAT_FIELD) + x_cart[1]*math.sin(MAT_FIELD)
-    y_curv = -x_cart[0]*math.sin(MAT_FIELD) + x_cart[1]*math.cos(MAT_FIELD)
-    i, j = ufl.indices(MESH_DIM)
-    e_tild_1 = ufl.as_vector([math.cos(MAT_FIELD), math.sin(MAT_FIELD)])
-    e_tild_2 = ufl.as_vector([-math.sin(MAT_FIELD), math.cos(MAT_FIELD)])
-    G = ufl.as_tensor([
-        [ufl.inner(e_tild_1, e_tild_1), ufl.inner(e_tild_1, e_tild_2)], 
-        [ufl.inner(e_tild_2, e_tild_1), ufl.inner(e_tild_2, e_tild_2)]
-    ])
-    Ginv = ufl.inv(G)
-    Push = ufl.as_matrix([
-        [math.cos(MAT_FIELD), math.sin(MAT_FIELD)], 
-        [-math.sin(MAT_FIELD), math.cos(MAT_FIELD)]
-    ])
-    Pull = ufl.inv(Push)
-    print(G)
-
-    # +==+==+
     # BC: Base [x0]
     # += Locate subdomain dofs
     x0_dofs_x = fem.locate_dofs_topological((W.sub(0).sub(X), Vx), ft.dim, x0_facets)
@@ -137,36 +117,70 @@ def main(test_name, elem_order):
     # += Test and Trial Parameters
     u, p = ufl.split(w)
     v, q = ufl.TestFunctions(W)
+
+    # +==+==+
+    # Metric Tensors
+    CART = ufl.SpatialCoordinate(domain)
+    Push = ufl.as_matrix([
+        [math.cos(ROT), -math.sin(ROT)], 
+        [math.sin(ROT), math.cos(ROT)]
+    ])
+    Pull = ufl.inv(Push)
+    CURV = ufl.variable(Pull * CART)
+    G = ufl.as_tensor([[1, 0], [0, 1]])
+
+    x_cart = ufl.variable(CART[0] + u[0])
+    y_cart = ufl.variable(CART[1] + u[1])
+    x_curv = ufl.variable(CURV[0] + u[0])
+    y_curv = ufl.variable(CURV[1] + u[1])
+    g = ufl.as_tensor([
+        [
+            x_cart*math.cos(ROT)**2 + x_cart*math.sin(ROT)**2,
+            -x_cart*math.cos(ROT)*y_cart*math.sin(ROT) + x_cart*math.sin(ROT)*y_cart*math.cos(ROT)
+        ],
+        [
+            -x_cart*math.cos(ROT)*y_cart*math.sin(ROT) + x_cart*math.sin(ROT)*y_cart*math.cos(ROT),
+            y_cart*math.sin(ROT)**2 + y_cart*math.cos(ROT)**2
+        ]
+    ])
+    E = ufl.variable(0.5*(g-G))
+
     # += Tensors
     #    (0): Identity Matrix
     #    (1): Deformation Gradient Tensor
     #    (2): Right Cauchy-Green Tensor
     #         (0): Invariants, Ic, IIc, J
     I = ufl.variable(ufl.Identity(MESH_DIM))
-    F = Push * Push * ufl.variable(I + ufl.grad(u))
+    F = ufl.variable(ufl.inv(Push).T * (I + ufl.grad(u)) * ufl.inv(Push))
+    
     C = ufl.variable(F.T * F)
     Ic = ufl.variable(ufl.tr(C))
     IIc = ufl.variable((Ic**2 - ufl.inner(C,C))/2)
     J = ufl.variable(ufl.det(F))
 
-    c = 0.8
-    bf = 10
+    # c = 0.876
+    # bf = 18.48
+    # bt = 3.58
+    # bfs = 1.627
+
+    c = 0.5
+    bf = 6
     bt = 2
-    bfs = 0.2
-    E = ufl.as_tensor(0.5*(C-I))
+    bfs = 0
+
     Q = bf * E[0,0]**2 + bt * E[1,1]**2 + bfs * (E[0,1]**2 + E[1,0]**2)
     psi = c/2 * (ufl.exp(Q) - 1)
     T = ufl.as_tensor([
         [
-            0.5 * (c/2 * ufl.exp(Q) * 2*bf*E[0,0] + c/2 * ufl.exp(Q) * 2*bf*E[0,0]) - p,
-            0.5 * (c/2 * ufl.exp(Q) * 2*bfs*E[0,1] + c/2 * ufl.exp(Q) * 2*bfs*E[1,0])
+            c/2 * ufl.exp(Q) * bf*E[0,0],
+            c/2 * ufl.exp(Q) * (bfs*E[1,0] + bfs*E[0,1])
         ],
         [
-            0.5 * (c/2 * ufl.exp(Q) * 2*bfs*E[1,0] + c/2 * ufl.exp(Q) * 2*bfs*E[0,1]),
-            0.5 * (c/2 * ufl.exp(Q) * 2*bt*E[1,1] + c/2 * ufl.exp(Q) * 2*bt*E[1,1]) - p
+            c/2 * ufl.exp(Q) * (bfs*E[0,1] + bfs*E[1,0]),
+            c/2 * ufl.exp(Q) * bt*E[1,1]
         ]
     ])
-    fPK = T * F.T
+    fPK = F * T + p * J * ufl.inv(F).T
     # += Material Setup | Mooney-Rivlin
     #    (0): Constants
     #    (1): Strain Density Function
@@ -185,7 +199,7 @@ def main(test_name, elem_order):
     #    (0): Quadrature order
     #    (1): Integration domains
     #    (2): Residual equation
-    metadata = {"quadrature_degree": 4}
+    metadata = {"quadrature_degree": 2}
     ds = ufl.Measure('ds', domain=domain, subdomain_data=ft, metadata=metadata)
     dx = ufl.Measure("dx", domain=domain, metadata=metadata)
     R = ufl.inner(ufl.grad(v), fPK) * dx + q * (J - 1) * dx 
