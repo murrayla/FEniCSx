@@ -18,7 +18,6 @@ from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
 from mpi4py import MPI
 import numpy as np
-import math
 import basix
 import ufl
 # += Parameters
@@ -26,8 +25,8 @@ MESH_DIM = 2
 X, Y = 0, 1
 X_ELS = 1
 Y_ELS = 1
-LAMBDA = 0.01 # 5% Contraction
-ROT = 0#math.pi/4
+LAMBDA = 0.05 # extension
+ROT = np.pi/4
 FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "area": 5}
 
 # +==+==+==+
@@ -58,6 +57,25 @@ def main(test_name, elem_order):
     V, _ = W.sub(0).collapse()
     Vx, dofsX = V.sub(X).collapse()
     Vy, dofsY = V.sub(Y).collapse()
+
+    # +==+==+
+    # Create Material Coordinates
+    class MaterialCoordinates():
+        # (0): Initiate a class defining rotation
+        def __init__(self, rot=ROT):
+            self.rot = ROT
+        # (1): Rotate coordinates into new field
+        def eval(self, x):
+            self.xMat = np.cos(self.rot) * x[0] + np.sin(self.rot) * x[1]
+            self.yMat = -np.sin(self.rot) * x[0] + np.sin(self.rot) * x[1]
+            return (self.xMat, self.yMat)
+    # += Define class
+    matCoords = MaterialCoordinates()
+    # += Interpolate
+    x_mat = fem.Function(V)
+    x_mat.interpolate(matCoords.eval)
+    # print(x_mat.x.array[dofsX])
+    # print(x_mat.x.array[dofsY])
 
     # +==+==+
     # Facet assignment
@@ -218,7 +236,7 @@ def main(test_name, elem_order):
     metadata = {"quadrature_degree": 2}
     ds = ufl.Measure('ds', domain=domain, subdomain_data=ft, metadata=metadata)
     dx = ufl.Measure("dx", domain=domain, metadata=metadata)
-    R = ufl.inner(ufl.grad(ufl.grad(v)) + ufl.grad(v), F * fPK) * dx + q * (J - 1) * dx 
+    R = ufl.inner(ufl.grad(v), F * fPK) * dx + q * (J - 1) * dx 
     # += Nonlinear Solver
     #    (0): Definition
     #    (1): Newton Iterator
