@@ -18,6 +18,7 @@ from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
 from mpi4py import MPI
 import numpy as np
+import math
 import basix
 import ufl
 # += Parameters
