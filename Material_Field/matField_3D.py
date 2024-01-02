@@ -23,11 +23,11 @@ import ufl
 # += Parameters
 MESH_DIM = 3
 X, Y, Z = 0, 1, 2
-X_ELS = 1
-Y_ELS = 1
-Z_ELS = 1
-LAMBDA = 0.0 # 10% extension
-ROT = 0#np.pi/4
+X_ELS = 5
+Y_ELS = 5
+Z_ELS = 5
+LAMBDA = 0.1 # 10% extension
+ROT = np.pi/4
 FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "z0": 5, "z1": 6, "area": 7}
 
 # +==+==+==+
@@ -146,13 +146,18 @@ def main(test_name, elem_order, constitutive):
         return nu
         
     nu = project(x_nu, V)
-
+    # +==+ Mapping
+    Push = ufl.as_matrix([
+        [ufl.cos(ROT), -ufl.sin(ROT), 0],
+        [ufl.sin(ROT), ufl.cos(ROT), 0],
+        [0, 0, 1]
+    ])
     # +==+ Covariant Metric Tensor
     Z_ij = ufl.grad(nu).T * ufl.grad(nu)
     # +==+ Covariant Basis
     z0, z1, z2 = nu.dx(0), nu.dx(1), nu.dx(2)
     # +==+ Tensor Indices
-    i, j, k, m = ufl.indices(4)
+    i, j, k, m, l = ufl.indices(5)
     # +==+ Christoffel Symbol
     gamma = ufl.as_tensor((
         0.5 * ufl.inv(Z_ij)[k, m] * (
@@ -160,14 +165,15 @@ def main(test_name, elem_order, constitutive):
         )
     ), [k, i, j])
     # +==+ Covariant Derivative
-    covDev = ufl.as_tensor(v[j].dx(k) - gamma[i, j, k] * v[i], [j, k])
+    
+    covDev = ufl.as_tensor(v[j].dx(l) * Push[l, k] - gamma[i, j, k] * v[i], [j, k])
 
     ux_nu = ufl.cos(ROT) * u[0]
     uy_nu = ufl.sin(ROT) * u[1]
     uz_nu = u[2]
     u_nu = ufl.as_vector((ux_nu, uy_nu, uz_nu))
 
-    F = ufl.variable(I + ufl.grad(u_nu))
+    F = ufl.as_tensor(I[i, k] + u[i].dx(j) * Push[j, k], [i, k])
     C = ufl.variable(F.T * F)
     E = ufl.as_matrix((0.5*(Z_ij[i,j]-I[i,j])), [i,j])
     Ic = ufl.variable(ufl.tr(C))
@@ -259,6 +265,6 @@ if __name__ == '__main__':
     # += Element order
     elem_order = 2
     # += Consitutive Equation
-    constitutive = 0
+    constitutive = 1
     # += Feed Main()
     main(test_name, elem_order, constitutive)
