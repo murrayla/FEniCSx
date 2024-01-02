@@ -23,9 +23,9 @@ import ufl
 # += Parameters
 MESH_DIM = 3
 X, Y, Z = 0, 1, 2
-X_ELS = 5
-Y_ELS = 5
-Z_ELS = 5
+X_ELS = 1
+Y_ELS = 1
+Z_ELS = 1
 LAMBDA = 0.1 # 10% extension
 ROT = np.pi/4
 FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "z0": 5, "z1": 6, "area": 7}
@@ -146,38 +146,53 @@ def main(test_name, elem_order, constitutive):
         return nu
         
     nu = project(x_nu, V)
-    # +==+ Mapping
-    Push = ufl.as_matrix([
-        [ufl.cos(ROT), -ufl.sin(ROT), 0],
-        [ufl.sin(ROT), ufl.cos(ROT), 0],
-        [0, 0, 1]
-    ])
-    # +==+ Covariant Metric Tensor
-    Z_ij = ufl.grad(nu).T * ufl.grad(nu)
-    # +==+ Covariant Basis
-    z0, z1, z2 = nu.dx(0), nu.dx(1), nu.dx(2)
-    # +==+ Tensor Indices
-    i, j, k, m, l = ufl.indices(5)
-    # +==+ Christoffel Symbol
-    gamma = ufl.as_tensor((
-        0.5 * ufl.inv(Z_ij)[k, m] * (
-            ufl.grad(Z_ij)[m, i, j] + ufl.grad(Z_ij)[m, j, i] - ufl.grad(Z_ij)[i, j, m]
-        )
-    ), [k, i, j])
-    # +==+ Covariant Derivative
-    
-    covDev = ufl.as_tensor(v[j].dx(l) * Push[l, k] - gamma[i, j, k] * v[i], [j, k])
 
     ux_nu = ufl.cos(ROT) * u[0]
     uy_nu = ufl.sin(ROT) * u[1]
     uz_nu = u[2]
     u_nu = ufl.as_vector((ux_nu, uy_nu, uz_nu))
 
-    F = ufl.as_tensor(I[i, k] + u[i].dx(j) * Push[j, k], [i, k])
-    C = ufl.variable(F.T * F)
-    E = ufl.as_matrix((0.5*(Z_ij[i,j]-I[i,j])), [i,j])
-    Ic = ufl.variable(ufl.tr(C))
-    IIc = ufl.variable((Ic**2 - ufl.inner(C,C))/2)
+    xu_nu = nu + u_nu
+
+    # +==+ Mapping
+    Push = ufl.as_matrix([
+        [ufl.cos(ROT), -ufl.sin(ROT), 0],
+        [ufl.sin(ROT), ufl.cos(ROT), 0],
+        [0, 0, 1]
+    ])
+    # +==+ Covariant and Contravariant Metric Tensor
+    Z_co = ufl.grad(xu_nu).T * ufl.grad(xu_nu)
+    Z_un = ufl.grad(nu).T * ufl.grad(nu)
+    Z_ct = ufl.inv(Z_co)
+    # +==+ Covariant and Contravariant Basis
+    # z_co = ufl.as_vector((nu.dx(0), nu.dx(1), nu.dx(2)))
+    z_co = ufl.inv(Push)
+    z_ct = Push
+    # +==+ Tensor Indices
+    i, j, k, a, b = ufl.indices(5)
+    # +==+ Christoffel Symbol
+    # christoffel = ufl.as_tensor((
+    #     0.5 * ufl.inv(Z_co)[k, a] * (
+    #         ufl.grad(Z_co)[a, i, j] + ufl.grad(Z_co)[a, j, i] - ufl.grad(Z_co)[i, j, a]
+    #     )
+    # ), [k, i, j])
+    # print(ufl.shape(z_co[1, 1] * nu[1]))
+    # print(ufl.shape(Push[1, 1] * z_ct[1, :]))
+    # print(ufl.shape(z_co[j, b] * nu[k] * Push[b, k] * z_ct[i, :]))
+    # christoffel = ufl.as_tensor(z_co[j, b] * nu[k] * Push[b, k] * z_ct[i, :], [i, j, a])
+    christoffel = ufl.as_tensor((
+        0.5 * ufl.inv(Z_ct)[k, a] * (
+            ufl.grad(Z_co)[a, i, j] + ufl.grad(Z_co)[a, j, i] - ufl.grad(Z_co)[i, j, a]
+        )
+    ), [k, i, j])
+    
+    # +==+ Covariant Derivative
+    covDev = ufl.as_tensor(ufl.grad(v)[j, b] * Push[b, a] - christoffel[i, j, a] * v[i], [j, a])
+
+    # F = ufl.as_tensor(I[i, k] + u_nu[i].dx(j) * Push[j, k], [i, k])
+    F = ufl.as_tensor(I[i, j] + u[i].dx(j), [i, j])
+    C = ufl.as_tensor(F[k, i]*F[k, j], [i, j])
+    E = ufl.as_matrix((0.5*(Z_co[i,j] - Z_un[i,j])), [i,j])
     J = ufl.variable(ufl.det(F))
     
     if constitutive == 0:
@@ -196,12 +211,12 @@ def main(test_name, elem_order, constitutive):
             b2 * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
         )
         # psi = c/2 * (ufl.exp(Q) - 1)
-        T = c/4 * ufl.exp(Q) * ufl.as_matrix([
+        piola = c/4 * ufl.exp(Q) * ufl.as_matrix([
             [4*b0*E[0,0], 2*b2*(E[1,0] + E[0,1]), 2*b2*(E[2,0] + E[0,2])],
             [2*b2*(E[0,1] + E[1,0]), 4*b1*E[1,1], 2*b1*(E[2,1] + E[1,2])],
             [2*b2*(E[0,2] + E[2,0]), 2*b1*(E[1,2] + E[2,1]), 4*b2*E[2,2]],
-        ]) #- p * ufl.inv(C)
-        fPK = F * T + p * J * ufl.inv(F).T
+        ]) -p * I
+        # piola = F * T + p * J * ufl.inv(F).T
 
     elif constitutive == 1:  
         # += Material Setup | Mooney-Rivlin
@@ -211,10 +226,12 @@ def main(test_name, elem_order, constitutive):
         #    (3): First Piola-Kirchoff Stress
         c1 = 2
         c2 = 6
+        Ic = ufl.variable(ufl.tr(C))
+        IIc = ufl.variable((Ic**2 - ufl.inner(C,C))/2)
         psi = c1 * (Ic - 3) + c2 *(IIc - 3) 
         term1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
         term2 = -ufl.diff(psi, IIc)
-        fPK = 2 * F * (term1*I + term2*C) + p * J * ufl.inv(F).T
+        piola = 2 * F * (term1*I + term2*C) + p * J * ufl.inv(F).T
     
     # +==+==+
     # Problem Solver
@@ -222,10 +239,12 @@ def main(test_name, elem_order, constitutive):
     #    (0): Quadrature order
     #    (1): Integration domains
     #    (2): Residual equation
+    term = ufl.as_tensor(piola[a, b] * F[j, b] * covDev[j, a])
     metadata = {"quadrature_degree": 4}
     ds = ufl.Measure('ds', domain=domain, subdomain_data=ft, metadata=metadata)
     dx = ufl.Measure("dx", domain=domain, metadata=metadata)
-    R = ufl.inner(covDev, fPK * F) * dx + q * (J - 1) * dx 
+    R = term * dx + q * (J - 1) * dx 
+    # R = ufl.inner(covDev[j], piola[a, b] * F[j, b]) * dx + q * (J - 1) * dx 
     # += Nonlinear Solver
     #    (0): Definition
     #    (1): Newton Iterator
