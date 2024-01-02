@@ -26,7 +26,7 @@ X, Y, Z = 0, 1, 2
 X_ELS = 1
 Y_ELS = 1
 Z_ELS = 1
-LAMBDA = 0.01 # 10% extension
+LAMBDA = 0.0 # 10% extension
 ROT = 0#np.pi/4
 FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "z0": 5, "z1": 6, "area": 7}
 
@@ -37,7 +37,7 @@ FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "z0": 5, "z1": 6, "area": 7}
 #       (1): elem_order | int | Order of elements to generate
 #   Outputs:
 #       (0): .bp folder of contracted unit square
-def main(test_name, elem_order):
+def main(test_name, elem_order, constitutive):
     # +==+==+
     # Setup problem space
     #    (0): Mesh, unit square
@@ -124,27 +124,7 @@ def main(test_name, elem_order):
     #    (2): Right Cauchy-Green Tensor
     #         (0): Invariants, Ic, IIc, J
     I = ufl.variable(ufl.Identity(MESH_DIM))
-    # F = ufl.variable(I + ufl.grad(u))
 
-    # # +==+==+
-    # # Create Material Coordinates
-    # class MaterialCoordinates():
-    #     # (0): Initiate a class defining rotation
-    #     def __init__(self, rot=ROT):
-    #         self.rot = ROT
-    #     # (1): Rotate coordinates into new field
-    #     def eval(self, x):
-    #         self.xMat = np.cos(self.rot) * x[0] + np.sin(self.rot) * x[1]
-    #         self.yMat = -np.sin(self.rot) * x[0] + np.sin(self.rot) * x[1]
-    #         self.zMat = x[2]
-    #         return (self.xMat, self.yMat, self.zMat)
-    # # += Define class
-    # matCoords = MaterialCoordinates()
-    # # += Interpolate
-    # x_mat = fem.Function(V)
-    
-    # x_mat.interpolate(matCoords.eval)
-    # expr = ufl.as_vector(("x[0]", "x[1]", "x[2]"))
     x = ufl.SpatialCoordinate(domain)
     x_nu = ufl.as_vector((
         ufl.cos(ROT)*x[0] + ufl.sin(ROT)*x[1], 
@@ -181,103 +161,54 @@ def main(test_name, elem_order):
     ), [k, i, j])
     # +==+ Covariant Derivative
     covDev = ufl.as_tensor(v[j].dx(k) - gamma[i, j, k] * v[i], [j, k])
-    # print(covDev)
 
     ux_nu = ufl.cos(ROT) * u[0]
     uy_nu = ufl.sin(ROT) * u[1]
     uz_nu = u[2]
     u_nu = ufl.as_vector((ux_nu, uy_nu, uz_nu))
-    
-    # undef = ufl.SpatialCoordinate(domain)
-    # x_nu = ufl.cos(ROT) * undef[0] - ux_nu
-    # y_nu = ufl.sin(ROT) * undef[1] - uy_nu
-    # z_nu = undef[2] - uz_nu
-    # nu = ufl.variable(ufl.as_vector((x_nu, y_nu, z_nu)))
 
-    F = ufl.variable(I + ufl.grad(u))
-
-    # # g_ij = ei•ej = ∂R/∂xi * ∂R/∂xj
-    # cov_met = ufl.grad(x_mat).T * ufl.grad(x_mat)
-    # print(cov_met)
-    # print(okay)
-
-    # # g^ij
-    # con_met, j_met = ufl.inv(cov_met), ufl.det(cov_met)
-    # # Directional Derivatives to get base vectors
-    # e_i, e_j, e_k = x_mat.dx(0), x_mat.dx(1), x_mat.dx(2)
-    # e = ufl.as_vector((e_i, e_j, e_k))
-    # # Contravariant base vectors
-    # e_i_c, e_j_c, e_k_c = (
-    #     con_met[0,0]*e_i + con_met[0,1]*e_j + con_met[0,2]*e_k, 
-    #     con_met[1,0]*e_i + con_met[1,1]*e_j + con_met[1,2]*e_k, 
-    #     con_met[2,0]*e_i + con_met[2,1]*e_j + con_met[2,2]*e_k
-    # )
-    # e_c = ufl.as_vector((e_i_c, e_j_c, e_k_c))
-    # # Forward transform
-    # Push = ufl.as_matrix([[np.cos(ROT), -np.sin(ROT)], [np.sin(ROT), np.cos(ROT)]])
-    # Pull = ufl.as_matrix([[np.cos(ROT), np.sin(ROT)], [-np.sin(ROT), np.cos(ROT)]])
-    
-    # i, j, k, l = ufl.indices(4)
-    
+    F = ufl.variable(I + ufl.grad(u_nu))
     C = ufl.variable(F.T * F)
+    E = ufl.as_matrix((0.5*(Z_ij[i,j]-I[i,j])), [i,j])
     Ic = ufl.variable(ufl.tr(C))
     IIc = ufl.variable((Ic**2 - ufl.inner(C,C))/2)
     J = ufl.variable(ufl.det(F))
+    
+    if constitutive == 0:
+        # += Material Setup | Guccione
+        #    (0): Constants
+        #    (1): Strain Density Function
+        #    (2): Chain Rule Differentiation Terms
+        #    (3): First Piola-Kirchoff Stress
+        c = 0.5 # 0.876
+        b0 = 6  # 18.48
+        b1 = 1  # 3.58
+        b2 = 1  # 1.627
+        Q = (
+            b0 * E[0,0]**2 + 
+            b1 * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
+            b2 * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
+        )
+        # psi = c/2 * (ufl.exp(Q) - 1)
+        T = c/4 * ufl.exp(Q) * ufl.as_matrix([
+            [4*b0*E[0,0], 2*b2*(E[1,0] + E[0,1]), 2*b2*(E[2,0] + E[0,2])],
+            [2*b2*(E[0,1] + E[1,0]), 4*b1*E[1,1], 2*b1*(E[2,1] + E[1,2])],
+            [2*b2*(E[0,2] + E[2,0]), 2*b1*(E[1,2] + E[2,1]), 4*b2*E[2,2]],
+        ]) #- p * ufl.inv(C)
+        fPK = F * T + p * J * ufl.inv(F).T
 
-    # E = ufl.variable(ufl.as_tensor((0.5*(cov_met[i,j]-I[i,j])), [i,j]))
-
-    # c = 0.876
-    # bf = 18.48
-    # bt = 3.58
-    # bs = 1.627
-
-    # # c = 0.5
-    # # bf = 6
-    # # bt = 2
-    # # bfs = 0
-
-    # Q = (
-    #     bf * E[0,0]**2 + 
-    #     bt * (E[1,1]**2 + E[2,2]**2 + E[1,2]**2 + E[2,1]**2) + 
-    #     bs * (E[0,1]**2 + E[1,0]**2 + E[0,2]**2 + E[2,0]**2)
-    # )
-    # psi = c/2 * (ufl.exp(Q) - 1)
-    # # T = ufl.as_tensor((0.5*c/2 * ufl.exp(Q) * (ufl.diff(Q,E[i,j])+ufl.diff(Q,E.T[j,i]))), [i,j])
-    # T = ufl.as_tensor([
-    #     [
-    #         c/2 * ufl.exp(Q) * bf*E[0,0],
-    #         c/2 * ufl.exp(Q) * (bs*E[0,1] + bs*E[1,0]),
-    #         c/2 * ufl.exp(Q) * (bs*E[0,2] + bs*E[2,0])
-    #     ],
-    #     [
-    #         c/2 * ufl.exp(Q) * (bs*E[1,0] + bs*E[0,1]),
-    #         c/2 * ufl.exp(Q) * bt*E[1,1],
-    #         c/2 * ufl.exp(Q) * (bt*E[1,2] + bt*E[2,1])
-    #     ],
-    #     [
-    #         c/2 * ufl.exp(Q) * (bs*E[2,0] + bs*E[0,2]),
-    #         c/2 * ufl.exp(Q) * (bt*E[2,1] + bt*E[1,2]),
-    #         c/2 * ufl.exp(Q) * bt*E[2,2],
-    #     ]
-    # ]) - p*I
-    # fPK = F * T #+ p * J * ufl.inv(F).T
-    # n = ufl.FacetNormal(domain)
-
-    # Na = 1/J * F.T*n
-    # += Material Setup | Mooney-Rivlin
-    #    (0): Constants
-    #    (1): Strain Density Function
-    #    (2): Chain Rule Differentiation Terms
-    #    (3): First Piola-Kirchoff Stress
-    c1 = 2
-    c2 = 6
-    psi = c1 * (Ic - 3) + c2 *(IIc - 3) 
-    term1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
-    term2 = -ufl.diff(psi, IIc)
-    fPK = 2 * F * (term1*I + term2*C) + p * J * ufl.inv(F).T
-
-    # first = ufl.as_tensor(fPK[k, m] * F[j, m] * covDev[j, k])
-    # n = ufl.FacetNormal(domain)
+    elif constitutive == 1:  
+        # += Material Setup | Mooney-Rivlin
+        #    (0): Constants
+        #    (1): Strain Density Function
+        #    (2): Chain Rule Differentiation Terms
+        #    (3): First Piola-Kirchoff Stress
+        c1 = 2
+        c2 = 6
+        psi = c1 * (Ic - 3) + c2 *(IIc - 3) 
+        term1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
+        term2 = -ufl.diff(psi, IIc)
+        fPK = 2 * F * (term1*I + term2*C) + p * J * ufl.inv(F).T
     
     # +==+==+
     # Problem Solver
@@ -327,5 +258,7 @@ if __name__ == '__main__':
     test_name = "unitCube_extension"
     # += Element order
     elem_order = 2
+    # += Consitutive Equation
+    constitutive = 0
     # += Feed Main()
-    main(test_name, elem_order)
+    main(test_name, elem_order, constitutive)
