@@ -16,6 +16,7 @@ from dolfinx import mesh, fem, io, default_scalar_type
 from dolfinx.fem.petsc import NonlinearProblem, LinearProblem
 from dolfinx.nls.petsc import NewtonSolver
 from mpi4py import MPI
+import matplotlib.pyplot as plt
 import numpy as np
 import math
 import basix
@@ -27,8 +28,9 @@ X_ELS = 1
 Y_ELS = 1
 Z_ELS = 1
 LAMBDA = 0.1 # 10% extension
-ROT = np.pi/2
+ROT = np.pi/4
 FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "z0": 5, "z1": 6, "area": 7}
+PLOT = 0
 
 # +==+==+==+
 # main()
@@ -37,7 +39,7 @@ FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "z0": 5, "z1": 6, "area": 7}
 #       (1): elem_order | int | Order of elements to generate
 #   Outputs:
 #       (0): .bp folder of contracted unit square
-def main(test_name, elem_order, constitutive):
+def main(test_name, elem_order, constitutive, quad_order):
     # +==+==+
     # Setup problem space
     #    (0): Mesh, unit square
@@ -189,15 +191,11 @@ def main(test_name, elem_order, constitutive):
             b1 * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
             b2 * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
         )
-        # psi = c/2 * (ufl.exp(Q) - 1)
         piola = c/4 * ufl.exp(Q) * ufl.as_matrix([
             [4*b0*E[0,0], 2*b2*(E[1,0] + E[0,1]), 2*b2*(E[2,0] + E[0,2])],
             [2*b2*(E[0,1] + E[1,0]), 4*b1*E[1,1], 2*b1*(E[2,1] + E[1,2])],
             [2*b2*(E[0,2] + E[2,0]), 2*b1*(E[1,2] + E[2,1]), 4*b2*E[2,2]],
         ]) - p * Z_un
-        # S = ufl.diff(psi, E)
-        # piola = F * S + p * ufl.inv(Z_un) * J * ufl.inv(F).T
-        # piola = F * T + p * J * ufl.inv(F).T
 
     elif constitutive == 1:  
         # += Material Setup | Mooney-Rivlin
@@ -210,14 +208,8 @@ def main(test_name, elem_order, constitutive):
         Ic = ufl.variable(ufl.tr(C))
         IIc = ufl.variable((Ic**2 - ufl.inner(C, C))/2)
         psi = c1 * (Ic - 3) + c2 *(IIc - 3) 
-        # S = 2 * ufl.diff(psi, C) #- p * ufl.inv(Z_un)
-        # piola = F * S + p * ufl.inv(Z_un) * J * ufl.inv(F).T
-        # piola = F * S + p * J * ufl.inv(F).T #- p * ufl.inv(Z_un)
-        # piola = ufl.as_tensor((0.5 * (ufl.diff(psi, E[a, b]) + ufl.diff(psi, E[b, a])) - p * ufl.inv(Z_un)[a, b]), [a, b])
         term1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
         term2 = -ufl.diff(psi, IIc)
-        # piola = (term1*I + term2*C) - p * Z_un
-
         piola = 2 * F * (term1*I + term2*C) + p * ufl.inv(Z_un) * J * ufl.inv(F).T
     
     # +==+==+
@@ -227,7 +219,7 @@ def main(test_name, elem_order, constitutive):
     #    (1): Integration domains
     #    (2): Residual equation
     term = ufl.as_tensor(piola[a, b] * F[j, b] * covDev[j, a])
-    metadata = {"quadrature_degree": 4}
+    metadata = {"quadrature_degree": quad_order}
     ds = ufl.Measure('ds', domain=domain, subdomain_data=ft, metadata=metadata)
     dx = ufl.Measure("dx", domain=domain, metadata=metadata)
     R = term * dx + q * (J - 1) * dx 
@@ -254,12 +246,78 @@ def main(test_name, elem_order, constitutive):
     else:
         print(f"Not converged after {num_its} iterations.")
     u_sol, p_sol = w.split()
+
+    # +==+==+
+    # Interpolate Stress
+    def cauchy(u, p):
+        defgrad = ufl.Identity(3) + ufl.grad(u)
+        rcauchy = defgrad.T * defgrad
+        gstrain = 0.5 * (rcauchy - ufl.Identity(3))
+        dgradja = ufl.det(defgrad)
+        c = 0.5 # 0.876
+        b0 = 20  # 18.48
+        b1 = 4  # 3.58
+        b2 = 1  # 1.627
+        Q = (
+            b0 * gstrain[0,0]**2 + 
+            b1 * (gstrain[1,1]**2 + gstrain[2,2]**2 + 2*(gstrain[1,2] + gstrain[2,1])) + 
+            b2 * (2*gstrain[0,1]*gstrain[1,0] + 2*gstrain[0,2]*gstrain[2,0])
+        )
+        spiolak = c/4 * ufl.exp(Q) * ufl.as_matrix([
+            [4*b0*gstrain[0,0], 2*b2*(gstrain[1,0] + gstrain[0,1]), 2*b2*(gstrain[2,0] + gstrain[0,2])],
+            [2*b2*(gstrain[0,1] + gstrain[1,0]), 4*b1*gstrain[1,1], 2*b1*(gstrain[2,1] + gstrain[1,2])],
+            [2*b2*(gstrain[0,2] + gstrain[2,0]), 2*b1*(gstrain[1,2] + gstrain[2,1]), 4*b2*gstrain[2,2]],
+        ]) - p * ufl.inv(rcauchy)
+        cstress = 1/dgradja * defgrad*spiolak*defgrad.T
+        return cstress
+    TS = fem.FunctionSpace(domain, ("CG", elem_order, (3, 3)))
+    piola_expr = fem.Expression(cauchy(u_sol, p_sol), TS.element.interpolation_points())
+    sig = fem.Function(TS)
+    sig.interpolate(piola_expr)
+    # print(ufl.shape(sig))
+    # print(sig.eval([1,1,1], [0]))
+    # print(sig.x.array[dofsX])
+    # exit
+
+    # +==+==+
+    # Scatter plot of x-displacement values at quadrature points
+    if PLOT:
+        fig = plt.figure()
+        ax = fig.add_subplot(projection='3d')
+        cm = plt.cm.get_cmap('coolwarm')
+        quad_points, _ = basix.make_quadrature(basix.cell.string_to_type(domain.topology.cell_name()), quad_order)
+        quad_x = ufl.SpatialCoordinate(domain)
+        quad_expr = fem.Expression(quad_x, quad_points)
+        cells_n = domain.topology.index_map(domain.topology.dim).size_local
+        u_x = list()
+        q_pts = list()
+        for i in range(0, cells_n, 1):
+            pts = quad_expr.eval(domain, [i])
+            for j in range(0, len(pts[0]), 3):
+                eval_at = pts[0, j:j+3]
+                q_pts.append(eval_at)
+                u_x.append(u_sol.eval(eval_at, [i])[0])
+        ps = np.array(q_pts)
+        sc = ax.scatter(ps[:, 0], ps[:, 1], ps[:, 2], c=u_x, vmin=min(u_x), vmax=max(u_x), s=50)
+
     # += Export
-    with io.VTXWriter(MPI.COMM_WORLD, test_name + ".bp", w.sub(0).collapse(), engine="BP4") as vtx:
+    strains = w.sub(0).collapse()
+    strains.name = "strains"
+    stresses = sig
+    stresses.name = "stresses"
+    with io.VTXWriter(MPI.COMM_WORLD, test_name + "_strains.bp", strains, engine="BP4") as vtx:
+        vtx.write(0.0)
+        vtx.close()
+    with io.VTXWriter(MPI.COMM_WORLD, test_name + "_stresses.bp", stresses, engine="BP4") as vtx:
         vtx.write(0.0)
         vtx.close()
 
-    print(u_sol.x.array[dofsY])
+    # += Plot
+    if PLOT:
+        plt.colorbar(sc)
+        plt.show()
+
+    # print(u_sol.x.array[dofsY])
     # print(x_nu)
     # x = m + u_sol
     # print(x)
@@ -270,10 +328,12 @@ def main(test_name, elem_order, constitutive):
 if __name__ == '__main__':
     # +==+ Test Parameters
     # += Test name
-    test_name = "unitCube_Guccione90"
+    test_name = "testing_plt"
     # += Element order
     elem_order = 2
     # += Consitutive Equation
     constitutive = 0
+    # += Quadature Degree
+    quad_order = 4
     # += Feed Main()
-    main(test_name, elem_order, constitutive)
+    main(test_name, elem_order, constitutive, quad_order)
