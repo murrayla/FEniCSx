@@ -31,6 +31,18 @@ LAMBDA = 0.1 # 10% extension
 ROT = np.pi/4
 FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "z0": 5, "z1": 6, "area": 7}
 PLOT = 0
+# Guccione
+# c, GCC_CONS[1], GCC_CONS[2], GCC_CONS[3]
+GCC_CONS = [0.5, 10, 1, 1]
+c = 0.5 # 0.876
+GCC_CONS[1] = 20  # 18.48
+GCC_CONS[2] = 4  # 3.58
+GCC_CONS[3] = 1  # 1.627
+# Mooney
+# c1, c2
+MNR_CONS = [2, 6]
+c1 = 2
+c2 = 6
 
 # +==+==+==+
 # main()
@@ -119,25 +131,33 @@ def main(test_name, elem_order, constitutive, quad_order):
     # += Test and Trial Parameters
     u, p = ufl.split(w)
     v, q = ufl.TestFunctions(W)
-    # +==+ Tensor Indices
+    # += Tensor Indices
     i, j, k, a, b, c, d = ufl.indices(7)
-    # +==+ Curvilinear Mapping
+    # += Curvilinear Mapping
     Push = ufl.as_tensor([
         [ufl.cos(ROT), -ufl.sin(ROT), 0],
         [ufl.sin(ROT), ufl.cos(ROT), 0],
         [0, 0, 1]
     ])
-    # +==+ Get Deformed Coordinates in Curvilinear 
+    # += Curvilinear Coordinates
+    #    (0): Function Variable
+    #    (1): Interpolation for x-values
+    #    (2): Curvilinear undeformed coordinates | X_(θ)
+    #    (3): Curvilinear displacement           | u_(θ)
+    #    (4): Curvilinear deformed coordinates   | x_(θ)
     x = fem.Function(V)
     x.interpolate(lambda x: x)
     x_nu = ufl.inv(Push) * x
     u_nu = ufl.inv(Push) * u
     nu = ufl.inv(Push) * (x + u_nu)
-    # +==+ Metric Tensors
-    Z_co = ufl.grad(nu).T * ufl.grad(nu)
+    # += Metric Tensors
+    #    (0): Covariant undeformed
+    #    (1): Covariant deformed
+    #    (2): Contravariant deformed
     Z_un = ufl.grad(x_nu).T * ufl.grad(x_nu)
+    Z_co = ufl.grad(nu).T * ufl.grad(nu)
     Z_ct = ufl.inv(Z_co)
-    # +==+ Covariant and Contravariant Basis
+    # += Covariant and Contravariant Basis
     z_co = ufl.as_tensor((nu.dx(0), nu.dx(1), nu.dx(2)))
     z_ct = ufl.as_tensor(
         (
@@ -146,68 +166,43 @@ def main(test_name, elem_order, constitutive, quad_order):
             Z_ct[0,2]*z_co[0] + Z_ct[1,2]*z_co[1] + Z_ct[2,2]*z_co[2]
         )
     )
-    # +==+ Christoffel Symbol
-    # christoffel = ufl.as_tensor(z_co[j, b] * nu[k] * Push[b, k] * z_ct[i, :], [i, j, a])
-    christoffel = ufl.as_tensor((
+    # += Christoffel Symbol | Γ^{i}_{j, a}
+    gamma = ufl.as_tensor((
         0.5 * Z_ct[k, a] * (
             ufl.grad(Z_co)[a, i, j] + ufl.grad(Z_co)[a, j, i] - ufl.grad(Z_co)[i, j, a]
         )
     ), [k, i, j])
-    # christoffel = ufl.as_tensor((
-    #     0.5 * Z_ct[k, a] * (
-    #         ufl.grad(Z_co)[a, i, b]*Push[b, j] + ufl.grad(Z_co)[a, j, c]*Push[c, i] - ufl.grad(Z_co)[i, j, d]*Push[d, a]
-    #     )
-    # ), [k, i, j])
-    # +==+ Covariant Derivative
-    covDev = ufl.grad(v) - ufl.as_tensor(v[k]*christoffel[k, i, j], [i, j])
-    # print(okay)
-    # covDev = ufl.as_tensor(ufl.grad(v)[j, b] * Push[b, a] - christoffel[i, j, a] * v[i], [j, a])
-
+    # += Covariant Derivative
+    covDev = ufl.grad(v) - ufl.as_tensor(v[k]*gamma[k, i, j], [i, j])
     # += Kinematics
-    #    (0): Identity Matrix
-    #    (1): Deformation Gradient Tensor
-    #    (2): Right Cauchy-Green Tensor
-    #    (3): Green-Strain Tensor
-    #    (4): Jacobian of Deformation Gradient
+    #    (0): Identity Matrix                   | I
+    #    (1): Deformation Gradient Tensor       | F
+    #    (2): Right Cauchy-Green Tensor         | C
+    #    (3): Green-Strain Tensor               | E
+    #    (4): Jacobian of Deformation Gradient  | J
     I = ufl.variable(ufl.Identity(MESH_DIM))
     F = ufl.as_tensor(I[i, j] + ufl.grad(u)[i, j], [i, j]) * Push
-    # F = ufl.as_tensor(I[i, j] + u[i].dx(j), [i, j])
     C = ufl.variable(ufl.as_tensor(F[k, i]*F[k, j], [i, j]))
     E = ufl.variable(ufl.as_tensor((0.5*(Z_co[i,j] - Z_un[i,j])), [i, j]))
     J = ufl.variable(ufl.det(F))
-    
+    # += Constitutive Equations
     if constitutive == 0:
         # += Material Setup | Guccione
-        #    (0): Constants
-        #    (1): Strain Density Function
-        #    (2): Chain Rule Differentiation Terms
-        #    (3): First Piola-Kirchoff Stress
-        c = 0.5 # 0.876
-        b0 = 20  # 18.48
-        b1 = 4  # 3.58
-        b2 = 1  # 1.627
         Q = (
-            b0 * E[0,0]**2 + 
-            b1 * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
-            b2 * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
+            GCC_CONS[1] * E[0,0]**2 + 
+            GCC_CONS[2] * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
+            GCC_CONS[3] * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
         )
-        piola = c/4 * ufl.exp(Q) * ufl.as_matrix([
-            [4*b0*E[0,0], 2*b2*(E[1,0] + E[0,1]), 2*b2*(E[2,0] + E[0,2])],
-            [2*b2*(E[0,1] + E[1,0]), 4*b1*E[1,1], 2*b1*(E[2,1] + E[1,2])],
-            [2*b2*(E[0,2] + E[2,0]), 2*b1*(E[1,2] + E[2,1]), 4*b2*E[2,2]],
+        piola = GCC_CONS[0]/4 * ufl.exp(Q) * ufl.as_matrix([
+            [4*GCC_CONS[1]*E[0,0], 2*GCC_CONS[3]*(E[1,0] + E[0,1]), 2*GCC_CONS[3]*(E[2,0] + E[0,2])],
+            [2*GCC_CONS[3]*(E[0,1] + E[1,0]), 4*GCC_CONS[2]*E[1,1], 2*GCC_CONS[2]*(E[2,1] + E[1,2])],
+            [2*GCC_CONS[3]*(E[0,2] + E[2,0]), 2*GCC_CONS[2]*(E[1,2] + E[2,1]), 4*GCC_CONS[3]*E[2,2]],
         ]) - p * Z_un
-
     elif constitutive == 1:  
         # += Material Setup | Mooney-Rivlin
-        #    (0): Constants
-        #    (1): Strain Density Function
-        #    (2): Chain Rule Differentiation Terms
-        #    (3): First Piola-Kirchoff Stress
-        c1 = 2
-        c2 = 6
         Ic = ufl.variable(ufl.tr(C))
         IIc = ufl.variable((Ic**2 - ufl.inner(C, C))/2)
-        psi = c1 * (Ic - 3) + c2 *(IIc - 3) 
+        psi = MNR_CONS[0] * (Ic - 3) + MNR_CONS[1] *(IIc - 3) 
         term1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
         term2 = -ufl.diff(psi, IIc)
         piola = 2 * F * (term1*I + term2*C) + p * ufl.inv(Z_un) * J * ufl.inv(F).T
@@ -218,10 +213,10 @@ def main(test_name, elem_order, constitutive, quad_order):
     #    (0): Quadrature order
     #    (1): Integration domains
     #    (2): Residual equation
-    term = ufl.as_tensor(piola[a, b] * F[j, b] * covDev[j, a])
     metadata = {"quadrature_degree": quad_order}
     ds = ufl.Measure('ds', domain=domain, subdomain_data=ft, metadata=metadata)
     dx = ufl.Measure("dx", domain=domain, metadata=metadata)
+    term = ufl.as_tensor(piola[a, b] * F[j, b] * covDev[j, a])
     R = term * dx + q * (J - 1) * dx 
     # R = ufl.inner(covDev[j], piola[a, b] * F[j, b]) * dx + q * (J - 1) * dx 
     # += Nonlinear Solver
@@ -249,27 +244,29 @@ def main(test_name, elem_order, constitutive, quad_order):
 
     # +==+==+
     # Interpolate Stress
+    #    (0): Function for calculating cauchy stress
     def cauchy(u, p):
-        defgrad = ufl.Identity(3) + ufl.grad(u)
-        rcauchy = defgrad.T * defgrad
-        gstrain = 0.5 * (rcauchy - ufl.Identity(3))
-        dgradja = ufl.det(defgrad)
-        c = 0.5 # 0.876
-        b0 = 20  # 18.48
-        b1 = 4  # 3.58
-        b2 = 1  # 1.627
-        Q = (
-            b0 * gstrain[0,0]**2 + 
-            b1 * (gstrain[1,1]**2 + gstrain[2,2]**2 + 2*(gstrain[1,2] + gstrain[2,1])) + 
-            b2 * (2*gstrain[0,1]*gstrain[1,0] + 2*gstrain[0,2]*gstrain[2,0])
+        i = ufl.Identity(MESH_DIM)
+        f = i + ufl.grad(u)
+        c = f.T * f
+        e = 0.5 * (c - i)
+        j = ufl.det(f)
+        q = (
+            GCC_CONS[1] * e[0,0]**2 + 
+            GCC_CONS[2] * (e[1,1]**2 + e[2,2]**2 + 2*(e[1,2] + e[2,1])) + 
+            GCC_CONS[3] * (2*e[0,1]*e[1,0] + 2*e[0,2]*e[2,0])
         )
-        spiolak = c/4 * ufl.exp(Q) * ufl.as_matrix([
-            [4*b0*gstrain[0,0], 2*b2*(gstrain[1,0] + gstrain[0,1]), 2*b2*(gstrain[2,0] + gstrain[0,2])],
-            [2*b2*(gstrain[0,1] + gstrain[1,0]), 4*b1*gstrain[1,1], 2*b1*(gstrain[2,1] + gstrain[1,2])],
-            [2*b2*(gstrain[0,2] + gstrain[2,0]), 2*b1*(gstrain[1,2] + gstrain[2,1]), 4*b2*gstrain[2,2]],
-        ]) - p * ufl.inv(rcauchy)
-        cstress = 1/dgradja * defgrad*spiolak*defgrad.T
-        return cstress
+        s = GCC_CONS[0]/4 * ufl.exp(q) * ufl.as_matrix([
+            [4*GCC_CONS[1]*e[0,0], 2*GCC_CONS[3]*(e[1,0] + e[0,1]), 2*GCC_CONS[3]*(e[2,0] + e[0,2])],
+            [2*GCC_CONS[3]*(e[0,1] + e[1,0]), 4*GCC_CONS[2]*e[1,1], 2*GCC_CONS[2]*(e[2,1] + e[1,2])],
+            [2*GCC_CONS[3]*(e[0,2] + e[2,0]), 2*GCC_CONS[2]*(e[1,2] + e[2,1]), 4*GCC_CONS[3]*e[2,2]],
+        ]) - p * ufl.inv(c)
+        sig = 1/j * f*s*f.T
+        return sig
+    #    (1): Create Tensor Function Space
+    #    (2): Define expression over points
+    #    (3): Create function variable
+    #    (4): Interpolate
     TS = fem.FunctionSpace(domain, ("CG", elem_order, (3, 3)))
     piola_expr = fem.Expression(cauchy(u_sol, p_sol), TS.element.interpolation_points())
     sig = fem.Function(TS)
@@ -305,10 +302,10 @@ def main(test_name, elem_order, constitutive, quad_order):
     strains.name = "strains"
     stresses = sig
     stresses.name = "stresses"
-    with io.VTXWriter(MPI.COMM_WORLD, test_name + "_strains.bp", strains, engine="BP4") as vtx:
+    with io.VTXWriter(MPI.COMM_WORLD, "Material_Field/paraview_bp/" + test_name + "_strains.bp", strains, engine="BP4") as vtx:
         vtx.write(0.0)
         vtx.close()
-    with io.VTXWriter(MPI.COMM_WORLD, test_name + "_stresses.bp", stresses, engine="BP4") as vtx:
+    with io.VTXWriter(MPI.COMM_WORLD, "Material_Field/paraview_bp/" + test_name + "_stresses.bp", stresses, engine="BP4") as vtx:
         vtx.write(0.0)
         vtx.close()
 
@@ -328,7 +325,7 @@ def main(test_name, elem_order, constitutive, quad_order):
 if __name__ == '__main__':
     # +==+ Test Parameters
     # += Test name
-    test_name = "testing_plt"
+    test_name = "folder_test"
     # += Element order
     elem_order = 2
     # += Consitutive Equation
