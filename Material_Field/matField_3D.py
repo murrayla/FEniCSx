@@ -35,8 +35,8 @@ PLOT = 0
 # c, GCC_CONS[1], GCC_CONS[2], GCC_CONS[3]
 GCC_CONS = [0.5, 10, 1, 1]
 c = 0.5 # 0.876
-GCC_CONS[1] = 20  # 18.48
-GCC_CONS[2] = 4  # 3.58
+GCC_CONS[1] = 1  # 18.48
+GCC_CONS[2] = 1  # 3.58
 GCC_CONS[3] = 1  # 1.627
 # Mooney
 # c1, c2
@@ -246,6 +246,7 @@ def main(test_name, elem_order, constitutive, quad_order):
     # Interpolate Stress
     #    (0): Function for calculating cauchy stress
     def cauchy(u, p):
+        print(u.x.array)
         i = ufl.Identity(MESH_DIM)
         f = i + ufl.grad(u)
         c = f.T * f
@@ -325,7 +326,7 @@ def main(test_name, elem_order, constitutive, quad_order):
 if __name__ == '__main__':
     # +==+ Test Parameters
     # += Test name
-    test_name = "folder_test"
+    test_name = "GC45_111"
     # += Element order
     elem_order = 2
     # += Consitutive Equation
