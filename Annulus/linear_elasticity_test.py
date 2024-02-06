@@ -21,7 +21,7 @@ import gmsh
 import ufl
 # += Parameters
 # Test type
-TEST_CASE = 1
+TEST_CASE = 0
 # Geometry
 L = 1
 W = 0.2
@@ -124,13 +124,16 @@ def main():
     # += Simple Cylinder
     if TEST_CASE == 0:
         # += Create mesh
-        create_gmsh_cylinder()
+        # create_gmsh_cylinder()
         # += Read .msh into domain for FEniCSx
         #    (1): File name .msh
         #    (2): Multiprocessing assignment
         #    (3): Rank of multiprocessing
         #    (4): Dimension of mesh
-        domain, _, ft = io.gmshio.read_from_msh("gmsh_msh/testCylinder.msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
+        # domain, _, ft = io.gmshio.read_from_msh("gmsh_msh/testCylinder.msh", MPI.COMM_WORLD, 0, gdim=MESH_DIM)
+        # ft.name = "Facet markers"
+        file = "/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/_meshdata/sarc.msh"
+        domain, _, ft = io.gmshio.read_from_msh(file, MPI.COMM_WORLD, 0, gdim=MESH_DIM)
         ft.name = "Facet markers"
     # += Cone shape
     if TEST_CASE == 1:

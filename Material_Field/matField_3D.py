@@ -24,10 +24,10 @@ import ufl
 # += Parameters
 MESH_DIM = 3
 X, Y, Z = 0, 1, 2
-X_ELS = 1
-Y_ELS = 1
-Z_ELS = 1
-LAMBDA = 0.1 # 10% extension
+X_ELS = 4
+Y_ELS = 4
+Z_ELS = 4
+LAMBDA = 0.0 # 10% extension
 ROT = np.pi/4
 FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "z0": 5, "z1": 6, "area": 7}
 PLOT = 0
@@ -109,10 +109,10 @@ def main(test_name, elem_order, constitutive, quad_order):
     u0_bc_x.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
     bc_x0_x = fem.dirichletbc(u0_bc_x, x0_dofs_x, W.sub(0).sub(X))
     # +==+ [x1]
-    x1_dofs_x = fem.locate_dofs_topological((W.sub(0).sub(X), Vx), ft.dim, x1_facets)
-    u1_bc_x = fem.Function(Vx)
-    u1_bc_x.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(LAMBDA)))
-    bc_x1_x = fem.dirichletbc(u1_bc_x, x1_dofs_x, W.sub(0).sub(X))
+    # x1_dofs_x = fem.locate_dofs_topological((W.sub(0).sub(X), Vx), ft.dim, x1_facets)
+    # u1_bc_x = fem.Function(Vx)
+    # u1_bc_x.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(LAMBDA)))
+    # bc_x1_x = fem.dirichletbc(u1_bc_x, x1_dofs_x, W.sub(0).sub(X))
     # +==+ [y0]
     y0_dofs_y = fem.locate_dofs_topological((W.sub(0).sub(Y), Vy), ft.dim, y0_facets)
     u0_bc_y = fem.Function(Vy)
@@ -124,7 +124,7 @@ def main(test_name, elem_order, constitutive, quad_order):
     u0_bc_z.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
     bc_z0_z = fem.dirichletbc(u0_bc_z, z0_dofs_z, W.sub(0).sub(Z))
     # +==+ BC Concatenate
-    bc = [bc_x0_x, bc_x1_x, bc_y0_y, bc_z0_z]
+    bc = [bc_x0_x, bc_y0_y, bc_z0_z]
 
     # +==+==+
     # Variational Problem Setup
@@ -185,6 +185,7 @@ def main(test_name, elem_order, constitutive, quad_order):
     C = ufl.variable(ufl.as_tensor(F[k, i]*F[k, j], [i, j]))
     E = ufl.variable(ufl.as_tensor((0.5*(Z_co[i,j] - Z_un[i,j])), [i, j]))
     J = ufl.variable(ufl.det(F))
+    aTen = ufl.as_tensor([[0.05, 0, 0],[0, 0, 0],[0, 0, 0]])
     # += Constitutive Equations
     if constitutive == 0:
         # += Material Setup | Guccione
@@ -197,7 +198,7 @@ def main(test_name, elem_order, constitutive, quad_order):
             [4*GCC_CONS[1]*E[0,0], 2*GCC_CONS[3]*(E[1,0] + E[0,1]), 2*GCC_CONS[3]*(E[2,0] + E[0,2])],
             [2*GCC_CONS[3]*(E[0,1] + E[1,0]), 4*GCC_CONS[2]*E[1,1], 2*GCC_CONS[2]*(E[2,1] + E[1,2])],
             [2*GCC_CONS[3]*(E[0,2] + E[2,0]), 2*GCC_CONS[2]*(E[1,2] + E[2,1]), 4*GCC_CONS[3]*E[2,2]],
-        ]) - p * Z_un
+        ]) - p * Z_un + aTen
     elif constitutive == 1:  
         # += Material Setup | Mooney-Rivlin
         Ic = ufl.variable(ufl.tr(C))
@@ -326,7 +327,7 @@ def main(test_name, elem_order, constitutive, quad_order):
 if __name__ == '__main__':
     # +==+ Test Parameters
     # += Test name
-    test_name = "GC45_111"
+    test_name = "GC45_ACTIVE_005_Hexa_4e"
     # += Element order
     elem_order = 2
     # += Consitutive Equation
