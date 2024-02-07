@@ -1,0 +1,3 @@
+Merge "SIMPLE_GC0_NEG5_TEST.msh";
+//+
+Spline(10076) = {100076, 100072, 100068};
