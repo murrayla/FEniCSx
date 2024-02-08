@@ -42,7 +42,7 @@ GEOMS = {
     13: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]}
 }
 SARC_L = 5000
-MESH_R = 1
+MESH_R = 10000
 PTs = list(range(100001, 100001+(Z_DISCS*10), 2))
 CRs = list(range(10001, 10001+(Z_DISCS*10), 2))
 CVs = list(range(20001, 20001+(Z_DISCS*10), 2))
@@ -70,7 +70,13 @@ def create_gmsh_cylinder():
     a_srf_ts = []
     all_crv_ts = []
     all_srf_ts = []
+
+    ide_curves = []
+    left_curves = []
+    right_curves = []
+    
     for i, d in enumerate(GEOMS.keys()):
+
         for j in range(0, len(GEOMS[d]["z"]), 1):
             pt = gmsh.model.occ.addPoint(
                 x=GEOMS[d]["z"][j][0], y=0, z=SARC_L*d, 
@@ -83,39 +89,88 @@ def create_gmsh_cylinder():
             )
             z_crv_ts.append(z_disc)
             z_loop = gmsh.model.occ.addCurveLoop(curveTags=[z_disc], tag=CVs.pop(0))
-            z_surf = gmsh.model.occ.addPlaneSurface(wireTags=[z_loop], tag=SFs.pop(0))
-            z_srf_ts.append(z_surf)
-            gmsh.model.occ.synchronize()
-            gmsh.model.addPhysicalGroup(
-                dim=MESH_DIM-1, tags=[z_surf], tag=PYs.pop(0), name="z_disc_" + str((i+1)*1+(j+1))
-            )
+            # z_surf = gmsh.model.occ.addPlaneSurface(wireTags=[z_loop], tag=SFs.pop(0))
+            # z_srf_ts.append(z_surf)
+            # gmsh.model.occ.synchronize()
+            # gmsh.model.addPhysicalGroup(
+            #     dim=MESH_DIM-1, tags=[z_surf], tag=PYs.pop(0), name="z_disc_" + str((i+1)*1+(j+1))
+            # )
             z_loo_ts.append(z_loop)
             all_crv_ts.append(z_loop)
-            all_srf_ts.append(z_surf)
-        # if d == 3:
-        #     break
+            if i < 8:
+                ide_curves.append(z_loop)
+            elif j == 0:
+                left_curves.append(z_loop)
+            elif j == 1:
+                right_curves.append(z_loop)
+
+
         if i < Z_DISCS-1:
-            for k in range(0, len(GEOMS[d]["a"]), 1):
-                pt = gmsh.model.occ.addPoint(
-                    x=GEOMS[d]["a"][k][0], y=0, z=SARC_L*d + SARC_L//2, 
+
+            if d == 7:
+                # break
+                cen_pt = gmsh.model.occ.addPoint(
+                    x=GEOMS[d]["a"][0][0], y=0, z=SARC_L*d + SARC_L//2, 
                     tag=PTs.pop(0), meshSize=MESH_R
                 )
-                a_pts.append(pt)
-                a_band = gmsh.model.occ.addCircle(
-                    x=GEOMS[d]["a"][k][0], y=0, z=SARC_L*d + SARC_L//2,
-                    r=GEOMS[d]["a"][k][2], tag=CRs.pop(0)
+                a_pts.append(cen_pt)
+                top_pt = gmsh.model.occ.addPoint(
+                    x=GEOMS[d]["a"][0][0], y=GEOMS[d]["a"][0][2], z=SARC_L*d + SARC_L//2, 
+                    tag=PTs.pop(0), meshSize=MESH_R
                 )
-                a_crv_ts.append(a_band)
-                a_loop = gmsh.model.occ.addCurveLoop(curveTags=[a_band], tag=CVs.pop(0))
-                a_surf = gmsh.model.occ.addPlaneSurface(wireTags=[a_loop], tag=SFs.pop(0))
-                a_srf_ts.append(a_surf)
-                gmsh.model.occ.synchronize()
-                gmsh.model.addPhysicalGroup(
-                    dim=MESH_DIM-1, tags=[a_surf], tag=PYs.pop(0), name="a_band_" + str((i+1)*1+(j+k+2))
+                a_pts.append(top_pt)
+                bot_pt = gmsh.model.occ.addPoint(
+                    x=GEOMS[d]["a"][0][0], y=-GEOMS[d]["a"][0][2], z=SARC_L*d + SARC_L//2, 
+                    tag=PTs.pop(0), meshSize=MESH_R
                 )
-                a_loo_ts.append(a_loop)
-                all_crv_ts.append(a_loop)
-                all_srf_ts.append(a_surf)
+                a_pts.append(bot_pt)
+                a_band_left = gmsh.model.occ.addCircleArc(startTag=bot_pt, centerTag=cen_pt, endTag=top_pt, tag=CRs.pop(0))
+                a_band_right = gmsh.model.occ.addCircleArc(startTag=top_pt, centerTag=cen_pt, endTag=bot_pt, tag=CRs.pop(0))
+                a_band_line = gmsh.model.occ.addLine(startTag=bot_pt, endTag=top_pt, tag=CRs.pop(0))
+                a_loop_left = gmsh.model.occ.addCurveLoop(curveTags=[a_band_left, a_band_line], tag=CVs.pop(0))
+                a_loop_right = gmsh.model.occ.addCurveLoop(curveTags=[a_band_right, a_band_line], tag=CVs.pop(0))
+
+                a_crv_ts.append(a_band_left)
+                a_crv_ts.append(a_band_right)
+                a_crv_ts.append(a_band_line)
+
+                a_loo_ts.append(a_loop_left)
+                a_loo_ts.append(a_loop_right)
+                all_crv_ts.append(a_loop_left)
+                all_crv_ts.append(a_loop_right)
+
+                left_curves.append(a_loop_left)
+                right_curves.append(a_loop_right)
+
+            else:
+
+                for k in range(0, len(GEOMS[d]["a"]), 1):
+                    pt = gmsh.model.occ.addPoint(
+                        x=GEOMS[d]["a"][k][0], y=0, z=SARC_L*d + SARC_L//2, 
+                        tag=PTs.pop(0), meshSize=MESH_R
+                    )
+                    a_pts.append(pt)
+                    a_band = gmsh.model.occ.addCircle(
+                        x=GEOMS[d]["a"][k][0], y=0, z=SARC_L*d + SARC_L//2,
+                        r=GEOMS[d]["a"][k][2], tag=CRs.pop(0)
+                    )
+                    a_crv_ts.append(a_band)
+                    a_loop = gmsh.model.occ.addCurveLoop(curveTags=[a_band], tag=CVs.pop(0))
+                    # a_surf = gmsh.model.occ.addPlaneSurface(wireTags=[a_loop], tag=SFs.pop(0))
+                    # a_srf_ts.append(a_surf)
+                    # gmsh.model.occ.synchronize()
+                    # gmsh.model.addPhysicalGroup(
+                    #     dim=MESH_DIM-1, tags=[a_surf], tag=PYs.pop(0), name="a_band_" + str((i+1)*1+(j+k+2))
+                    # )
+                    a_loo_ts.append(a_loop)
+                    all_crv_ts.append(a_loop)
+
+                    if i < 8:
+                        ide_curves.append(a_loop)
+                    elif k == 0:
+                        left_curves.append(a_loop)
+                    elif k == 1:
+                        right_curves.append(a_loop)
     
     # sarcomere = []
     # for i in range(0, len(a_loo_ts), 1):
