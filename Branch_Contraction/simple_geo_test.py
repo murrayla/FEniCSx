@@ -20,7 +20,7 @@ import ufl
 MESH_DIM = 3
 ORDER = 2
 X, Y, Z = 0, 1, 2
-LAMBDA = -0.02*65000
+LAMBDA = -900 #-0.02*65000
 ROT = 0
 Z_DISCS = 14
 SARC_N = 7
@@ -43,22 +43,22 @@ GEOMS = {
     12: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]},
     13: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]}
 }
-GEOMS = {
-    0: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    1: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    2: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    3: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    4: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    5: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    6: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    7: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    8: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    9: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    10: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    11: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    12: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    13: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-}
+# GEOMS = {
+#     0: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+#     1: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+#     2: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+#     3: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+#     4: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+#     5: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+#     6: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+#     7: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+#     8: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+#     9: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+#     10: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+#     11: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+#     12: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+#     13: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+# }
 
 SARC_L = 5000
 MESH_R = 10000
@@ -110,189 +110,91 @@ def create_gmsh_cylinder():
             z_loop = gmsh.model.occ.addCurveLoop(curveTags=[z_disc], tag=CVs.pop(0))
             z_loo_ts.append(z_loop)
             all_crv_ts.append(z_loop)
-            ide_curves.append(z_loop)
-            # if i < 8:
-            #     ide_curves.append(z_loop)
-            # elif j == 0:
-            #     left_curves.append(z_loop)
-            # elif j == 1:
-            #     right_curves.append(z_loop)
+            # ide_curves.append(z_loop)
+            if i < 8:
+                ide_curves.append(z_loop)
+            elif j == 0:
+                left_curves.append(z_loop)
+            elif j == 1:
+                right_curves.append(z_loop)
 
 
         if i < Z_DISCS-1:
 
-            # if d == 7:
-            #     c = [GEOMS[d]["a"][0][0], 0, SARC_L*d + SARC_L//2]
-            #     t = [GEOMS[d]["a"][0][0], GEOMS[d]["a"][0][2], SARC_L*d + SARC_L//2]
-            #     top_pt = gmsh.model.occ.addPoint(x=t[0], y=t[1], z=t[2],  meshSize=MESH_R
-            #     )
-            #     a_pts.append(top_pt)
-            #     b = [GEOMS[d]["a"][0][0], -GEOMS[d]["a"][0][2], SARC_L*d + SARC_L//2]
-            #     bot_pt = gmsh.model.occ.addPoint(x=b[0], y=b[1], z=b[2],  meshSize=MESH_R
-            #     )
-            #     a_pts.append(bot_pt)
-            #     a_band_left = gmsh.model.occ.addCircle(x=c[0], y=c[1], z=c[2], r=GEOMS[d]["a"][0][2], angle1=np.pi/2, angle2=3*np.pi/2, tag=CRs.pop(0))
-            #     a_band_left_line = gmsh.model.occ.addLine(startTag=bot_pt+1, endTag=bot_pt+2, tag=CRs.pop(0))
-            #     a_band_right = gmsh.model.occ.addCircle(x=c[0], y=c[1], z=c[2], r=GEOMS[d]["a"][0][2], angle1=3*np.pi/2, angle2=np.pi/2, tag=CRs.pop(0))
-            #     a_band_right_line = gmsh.model.occ.addLine(startTag=bot_pt+3, endTag=bot_pt+4, tag=CRs.pop(0))
+            for k in range(0, len(GEOMS[d]["a"]), 1):
+                pt = gmsh.model.occ.addPoint(
+                    x=GEOMS[d]["a"][k][0], y=0, z=SARC_L*d + SARC_L//2, 
+                        meshSize=MESH_R
+                )
+                a_pts.append(pt)
+                a_band = gmsh.model.occ.addCircle(
+                    x=GEOMS[d]["a"][k][0], y=0, z=SARC_L*d + SARC_L//2,
+                    r=GEOMS[d]["a"][k][2], tag=CRs.pop(0)
+                )
+                a_crv_ts.append(a_band)
+                a_loop = gmsh.model.occ.addCurveLoop(curveTags=[a_band], tag=CVs.pop(0))
+                a_loo_ts.append(a_loop)
+                all_crv_ts.append(a_loop)
 
-            #     a_loop_left = gmsh.model.occ.addCurveLoop(curveTags=[a_band_left, a_band_left_line], tag=CVs.pop(0))
-            #     a_loop_right = gmsh.model.occ.addCurveLoop(curveTags=[a_band_right, a_band_right_line], tag=CVs.pop(0))
+                # ide_curves.append(a_loop)
 
-            #     a_surf = gmsh.model.occ.addPlaneSurface(wireTags=[a_loop_left], tag=SFs.pop(0))
-            #     a_srf_ts.append(a_surf)
-            #     a_surf = gmsh.model.occ.addPlaneSurface(wireTags=[a_loop_right], tag=SFs.pop(0))
-            #     a_srf_ts.append(a_surf)
-
-            #     # gmsh.model.occ.synchronize()
-            #     # gmsh.model.addPhysicalGroup(
-            #     #     dim=MESH_DIM-1, tags=[a_surf], tag=PYs.pop(0), name="a_band_" + str((i+1)*1+(0+k+2))
-            #     # )
-
-            #     a_crv_ts.append(a_band_left)
-            #     a_crv_ts.append(a_band_right)
-            #     a_crv_ts.append(a_band_left_line)
-            #     a_crv_ts.append(a_band_right_line)
-
-            #     a_loo_ts.append(a_loop_left)
-            #     a_loo_ts.append(a_loop_right)
-            #     all_crv_ts.append(a_loop_left)
-            #     all_crv_ts.append(a_loop_right)
-
-            #     left_curves.append(a_loop_left)
-            #     right_curves.append(a_loop_right)
-
-            # else:
-
-                for k in range(0, len(GEOMS[d]["a"]), 1):
-                    pt = gmsh.model.occ.addPoint(
-                        x=GEOMS[d]["a"][k][0], y=0, z=SARC_L*d + SARC_L//2, 
-                         meshSize=MESH_R
-                    )
-                    a_pts.append(pt)
-                    a_band = gmsh.model.occ.addCircle(
-                        x=GEOMS[d]["a"][k][0], y=0, z=SARC_L*d + SARC_L//2,
-                        r=GEOMS[d]["a"][k][2], tag=CRs.pop(0)
-                    )
-                    a_crv_ts.append(a_band)
-                    a_loop = gmsh.model.occ.addCurveLoop(curveTags=[a_band], tag=CVs.pop(0))
-                    a_loo_ts.append(a_loop)
-                    all_crv_ts.append(a_loop)
-
+                ########
+                if i < 8:
                     ide_curves.append(a_loop)
-
-                    # if i < 8:
-                    #     ide_curves.append(a_loop)
-                    # elif k == 0:
-                    #     left_curves.append(a_loop)
-                    # elif k == 1:
-                    #     right_curves.append(a_loop)
+                elif k == 0:
+                    left_curves.append(a_loop)
+                elif k == 1:
+                    right_curves.append(a_loop)
+                ########
     
     
-    # first = ide_curves.copy()
-    # first.append(left_curves[0])
     a = gmsh.model.occ.addThruSections(wireTags=ide_curves, tag=11111, makeSolid=True, makeRuled=True)
-    # b = gmsh.model.occ.addThruSections(wireTags=[ide_curves[-1]] + left_curves, tag=22222, makeSolid=True, makeRuled=True)
-    # c = gmsh.model.occ.addThruSections(wireTags=[ide_curves[-1]] + right_curves, tag=33333, makeSolid=True, makeRuled=True)
-    # # print(a, b, c)
-    # gmsh.model.occ.synchronize()
-    # d = gmsh.model.occ.fuse([(2, 18)], [(2, 31)], removeObject=True, removeTool=True)
-    # print(d)
-    # gmsh.model.occ.synchronize()
-    # new = gmsh.model.occ.copy([(2,1)])
-    # new = gmsh.model.occ.copy([(2,3)])
-    # new = gmsh.model.occ.copy([(2,4)])
-    # new = gmsh.model.occ.copy([(2,5)])
-    #####
-    # gmsh.model.occ.remove(a, recursive=False)
-    # gmsh.model.occ.remove(b, recursive=False)
-    # gmsh.model.occ.remove(c, recursive=False)
-    # d = gmsh.model.occ.fuse([(2, 18)], [(2, 31)], removeObject=True, removeTool=True)
-    # gmsh.model.occ.remove([(2, 18)], recursive=False)
-    # gmsh.model.occ.remove([(2, 31)], recursive=False)
-    # gmsh.model.occ.remove([(2, 48)], recursive=False)
-    # gmsh.model.occ.remove([(2, 45)], recursive=False)
-    # gmsh.model.occ.remove([(2, 44)], recursive=False)
-    # gmsh.model.occ.remove([(2, 17)], recursive=False)
-    # gmsh.model.occ.remove([(2, 29)], recursive=False)
-    # gmsh.model.occ.remove([(2, 42)], recursive=False)
-    # gmsh.model.occ.synchronize()
-    # # gmsh.model.occ.synchronize()
+
+    # ########
+    b = gmsh.model.occ.addThruSections(wireTags=[ide_curves[-1]] + left_curves, tag=22222, makeSolid=True, makeRuled=True)
+    c = gmsh.model.occ.addThruSections(wireTags=[ide_curves[-1]] + right_curves, tag=33333, makeSolid=True, makeRuled=True)
+    # ########
+
+    # ########
+    gmsh.model.occ.remove(a, recursive=False)
+    gmsh.model.occ.remove(b, recursive=False)
+    gmsh.model.occ.remove(c, recursive=False)
+    d = gmsh.model.occ.fuse([(2, 18)], [(2, 31)], removeObject=True, removeTool=True)
+    # ########
+
+    # ########
     gmsh.model.occ.synchronize()
-    # sf = [16, 1, 2, 3, 4,5, 6, 7, 8, 9, 10,11, 12, 13, 14, 15] #, 46, 47,
-        #   19, 20,21,22,23,24,25,26,27,28,30,
-        #   33,34,35,36,37,38,39,40,41,43]
-
-    # gmsh.model.occ.remove([(2, 17)], recursive=False) 
-    # gmsh.model.occ.remove([(2, 42)], recursive=False) 
-    ########
-    # gmsh.model.occ.remove([(2, 29)], recursive=False) 
-    # gmsh.model.occ.remove([(2, 48)], recursive=False) 
-    # gmsh.model.occ.remove([(2, 45)], recursive=False) 
-    # gmsh.model.occ.remove([(2, 44)], recursive=False) 
-    # gmsh.model.occ.remove([(2, 42)], recursive=False) 
-    # ideal = list(range(1, 17, 1))# + [44, 45, 48]
-
-    # gmsh.model.occ.fuse([(2, 15)], [(2, 44), (2, 45), (2, 48)], removeObject=True, removeTool=True)
-    # ideal_sl = gmsh.model.occ.addSurfaceLoop(ideal, sewing=True)
-    # ideal_vol = gmsh.model.occ.addVolume([ideal_sl])
-
-    # gmsh.model.occ.synchronize()
-
-    ##########
-    # gmsh.model.occ.fuse([(2, 15)], [(2, 46), (2, 47)], removeObject=True, removeTool=True)
-    # branch = list(range(19, 29, 1)) + [30] + list(range(32, 42, 1)) + [43, 48, 47]
-    # # gmsh.model.occ.fuse([(2, 15)], [(2, 44), (2, 45), (2, 48)], removeObject=True, removeTool=True)
-    # # gmsh.model.occ.fuse([(2, 15)], [(2, 44), (2, 45), (2, 48)], removeObject=True, removeTool=True)
-    # branch_sl = gmsh.model.occ.addSurfaceLoop(ideal+branch, sewing=True)
-    # branch_vol = gmsh.model.occ.addVolume([branch_sl])
-
-    # gmsh.model.occ.synchronize()
-
-    # gmsh.model.occ.fuse([(3, 1)], [(3, 2)], removeObject=True, removeTool=True)
-    # # exit()
-    # print(e)
-    # exit()
-    # exit()
-    # # d = gmsh.model.occ.fuse(b, c, removeObject=True, removeTool=True)
-    # gmsh.model.occ.cut(b, c)
-
-    # e = gmsh.model.occ.fuse(b, d[0])
-    # print(e)
-    # exit()
-    # gmsh.model.occ.cut(b, c)
+    gmsh.model.occ.remove([(2, 29)], recursive=False) 
+    gmsh.model.occ.remove([(2, 48)], recursive=False) 
+    gmsh.model.occ.remove([(2, 45)], recursive=False) 
+    gmsh.model.occ.remove([(2, 44)], recursive=False) 
+    gmsh.model.occ.remove([(2, 42)], recursive=False) 
+    ideal = list(range(1, 17, 1))
+    # ##########
 
     gmsh.model.occ.synchronize()
 
-    # sarcomere = []
-    # for i in range(0, len(a_loo_ts), 1):
-    #     sarcomere.append([z_loo_ts[i], a_loo_ts[i], z_loo_ts[i+1]])
-    # extrusion = []
-    # # for gs in sarcomere:
-    # ext = gmsh.model.occ.addThruSections(wireTags=all_crv_ts, makeSolid=True, makeRuled=False)
-    # extrusion.append(ext)
-    # gmsh.model.occ.synchronize()
+    # ##########
+    gmsh.model.occ.fuse([(2, 15)], [(2, 46), (2, 47)], removeObject=True, removeTool=True)
+    branch = list(range(19, 29, 1)) + [30] + list(range(32, 42, 1)) + [43, 48, 47]
+    branch_sl = gmsh.model.occ.addSurfaceLoop(ideal+branch, sewing=True)
+    branch_vol = gmsh.model.occ.addVolume([branch_sl])
+    gmsh.model.occ.synchronize()
+    # ##########
 
-    # volume = gmsh.model.addPhysicalGroup(3, [extrusion[1][1]], name="volume")
-    # for k in range(0, 2, 1):
-    #     ide = k + 1
-    #     # gmsh.model.addPhysicalGroup(3, [ide], name="Sarc_" + str(k) + "_Vol")
-    #     gmsh.model.addPhysicalGroup(2, [ide], name="Sarc_" + str(k) + "_b")
-    #     gmsh.model.addPhysicalGroup(2, [ide+2], name="Sarc_" + str(k+5) + "_c")
-    #     gmsh.model.addPhysicalGroup(2, [ide+4], name="Sarc_" + str(k+10) + "_d")
-    # gmsh.model.occ.synchronize()
+    # $%&
+    # gmsh.model.addPhysicalGroup(3, [11111], name="Myo_Vol")
+    # gmsh.model.addPhysicalGroup(2, [27], name="Myo_Base")
+    # gmsh.model.addPhysicalGroup(2, [28], name="Sarc_Top")
+    # $%2
 
-    # gmsh.model.occ.remove([(3, 1)])
-    # gmsh.model.occ.remove([(3, 2)])
-    # sl = gmsh.model.occ.addSurfaceLoop([1, 2, 4, 6])
-    # gmsh.model.occ.addVolume([sl])
+    ######
+    gmsh.model.addPhysicalGroup(3, [1], name="Myo_Vol")
+    gmsh.model.addPhysicalGroup(2, [16], name="Myo_Base")
+    gmsh.model.addPhysicalGroup(2, [30, 43 ], name="Sarc_Top")
+    #######
 
-    gmsh.model.addPhysicalGroup(3, [11111], name="Myo_Vol")
-    gmsh.model.addPhysicalGroup(2, [27], name="Myo_Base")
-    gmsh.model.addPhysicalGroup(2, [28], name="Sarc_Top")
-    # gmsh.model.addPhysicalGroup(2, [16], name="Myo_Base")
-    # gmsh.model.addPhysicalGroup(2, [30, 43 ], name="Sarc_Top")
-    # gmsh.model.addPhysicalGroup(2, [ide], name="Sarc_" + str(k) + "_b")
+
     gmsh.model.occ.synchronize()
     
 
@@ -388,7 +290,7 @@ def main(test_name, quad_order):
     # +==+ [z1]
     z1_dofs_z = fem.locate_dofs_topological((W.sub(0).sub(Z), Vz), ft.dim, z1_facets)
     u1_bc_z = fem.Function(Vz)
-    u1_bc_z.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
+    u1_bc_z.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(LAMBDA)))
     bc_z1_z = fem.dirichletbc(u1_bc_z, z1_dofs_z, W.sub(0).sub(Z))
     # +==+ BC Concatenate
     bc = [bc_x0_x, bc_y0_y, bc_z0_z, bc_x1_x, bc_y1_y, bc_z1_z]
@@ -438,8 +340,8 @@ def main(test_name, quad_order):
 
     solver = NewtonSolver(domain.comm, problem)
     # += Tolerances for convergence
-    solver.atol = 1e-5
-    solver.rtol = 1e-5
+    solver.atol = 1e-4
+    solver.rtol = 1e-4
     # += Convergence criteria
     solver.convergence_criterion = "incremental"
 
@@ -582,7 +484,7 @@ def main(test_name, quad_order):
 if __name__ == '__main__':
     # +==+ Test Parameters
     # += Test name
-    test_name = "Ideal_GC0_NEG5_TEST"
+    test_name = "CONF_TEST_BRANCH0900"
     # += Quadature Degree
     quad_order = 4
     # += Feed Main()
