@@ -43,12 +43,12 @@ GEOMS = {
 }
 SARC_L = 5000
 MESH_R = 10000
-PTs = list(range(100001, 100001+(Z_DISCS*10), 2))
-CRs = list(range(10001, 10001+(Z_DISCS*10), 2))
-CVs = list(range(20001, 20001+(Z_DISCS*10), 2))
-SFs = list(range(1001, 1001+(Z_DISCS*10), 2))
-PYs = list(range(101, 101+(Z_DISCS*10), 2))
-VOs = list(range(11, 11+(Z_DISCS*10), 2))
+PTs = list(range(100001, 100001+(Z_DISCS*20), 5))
+CRs = list(range(10001, 10001+(Z_DISCS*20), 5))
+CVs = list(range(20001, 20001+(Z_DISCS*20), 5))
+SFs = list(range(1001, 1001+(Z_DISCS*20), 5))
+PYs = list(range(101, 101+(Z_DISCS*20), 5))
+VOs = list(range(11, 11+(Z_DISCS*20), 5))
 # Guccione
 GCC_CONS = [0.5, 1, 1, 1]
 
@@ -76,11 +76,11 @@ def create_gmsh_cylinder():
     right_curves = []
     
     for i, d in enumerate(GEOMS.keys()):
-
+        print(i, d)
         for j in range(0, len(GEOMS[d]["z"]), 1):
             pt = gmsh.model.occ.addPoint(
                 x=GEOMS[d]["z"][j][0], y=0, z=SARC_L*d, 
-                tag=PTs.pop(0), meshSize=MESH_R
+                 meshSize=MESH_R
             )
             z_pts.append(pt)
             z_disc = gmsh.model.occ.addCircle(
@@ -89,12 +89,6 @@ def create_gmsh_cylinder():
             )
             z_crv_ts.append(z_disc)
             z_loop = gmsh.model.occ.addCurveLoop(curveTags=[z_disc], tag=CVs.pop(0))
-            # z_surf = gmsh.model.occ.addPlaneSurface(wireTags=[z_loop], tag=SFs.pop(0))
-            # z_srf_ts.append(z_surf)
-            # gmsh.model.occ.synchronize()
-            # gmsh.model.addPhysicalGroup(
-            #     dim=MESH_DIM-1, tags=[z_surf], tag=PYs.pop(0), name="z_disc_" + str((i+1)*1+(j+1))
-            # )
             z_loo_ts.append(z_loop)
             all_crv_ts.append(z_loop)
             if i < 8:
@@ -107,47 +101,53 @@ def create_gmsh_cylinder():
 
         if i < Z_DISCS-1:
 
-            if d == 7:
-                # break
-                cen_pt = gmsh.model.occ.addPoint(
-                    x=GEOMS[d]["a"][0][0], y=0, z=SARC_L*d + SARC_L//2, 
-                    tag=PTs.pop(0), meshSize=MESH_R
-                )
-                a_pts.append(cen_pt)
-                top_pt = gmsh.model.occ.addPoint(
-                    x=GEOMS[d]["a"][0][0], y=GEOMS[d]["a"][0][2], z=SARC_L*d + SARC_L//2, 
-                    tag=PTs.pop(0), meshSize=MESH_R
-                )
-                a_pts.append(top_pt)
-                bot_pt = gmsh.model.occ.addPoint(
-                    x=GEOMS[d]["a"][0][0], y=-GEOMS[d]["a"][0][2], z=SARC_L*d + SARC_L//2, 
-                    tag=PTs.pop(0), meshSize=MESH_R
-                )
-                a_pts.append(bot_pt)
-                a_band_left = gmsh.model.occ.addCircleArc(startTag=bot_pt, centerTag=cen_pt, endTag=top_pt, tag=CRs.pop(0))
-                a_band_right = gmsh.model.occ.addCircleArc(startTag=top_pt, centerTag=cen_pt, endTag=bot_pt, tag=CRs.pop(0))
-                a_band_line = gmsh.model.occ.addLine(startTag=bot_pt, endTag=top_pt, tag=CRs.pop(0))
-                a_loop_left = gmsh.model.occ.addCurveLoop(curveTags=[a_band_left, a_band_line], tag=CVs.pop(0))
-                a_loop_right = gmsh.model.occ.addCurveLoop(curveTags=[a_band_right, a_band_line], tag=CVs.pop(0))
+            # if d == 7:
+            #     c = [GEOMS[d]["a"][0][0], 0, SARC_L*d + SARC_L//2]
+            #     t = [GEOMS[d]["a"][0][0], GEOMS[d]["a"][0][2], SARC_L*d + SARC_L//2]
+            #     top_pt = gmsh.model.occ.addPoint(x=t[0], y=t[1], z=t[2],  meshSize=MESH_R
+            #     )
+            #     a_pts.append(top_pt)
+            #     b = [GEOMS[d]["a"][0][0], -GEOMS[d]["a"][0][2], SARC_L*d + SARC_L//2]
+            #     bot_pt = gmsh.model.occ.addPoint(x=b[0], y=b[1], z=b[2],  meshSize=MESH_R
+            #     )
+            #     a_pts.append(bot_pt)
+            #     a_band_left = gmsh.model.occ.addCircle(x=c[0], y=c[1], z=c[2], r=GEOMS[d]["a"][0][2], angle1=np.pi/2, angle2=3*np.pi/2, tag=CRs.pop(0))
+            #     a_band_left_line = gmsh.model.occ.addLine(startTag=bot_pt+1, endTag=bot_pt+2, tag=CRs.pop(0))
+            #     a_band_right = gmsh.model.occ.addCircle(x=c[0], y=c[1], z=c[2], r=GEOMS[d]["a"][0][2], angle1=3*np.pi/2, angle2=np.pi/2, tag=CRs.pop(0))
+            #     a_band_right_line = gmsh.model.occ.addLine(startTag=bot_pt+3, endTag=bot_pt+4, tag=CRs.pop(0))
 
-                a_crv_ts.append(a_band_left)
-                a_crv_ts.append(a_band_right)
-                a_crv_ts.append(a_band_line)
+            #     a_loop_left = gmsh.model.occ.addCurveLoop(curveTags=[a_band_left, a_band_left_line], tag=CVs.pop(0))
+            #     a_loop_right = gmsh.model.occ.addCurveLoop(curveTags=[a_band_right, a_band_right_line], tag=CVs.pop(0))
 
-                a_loo_ts.append(a_loop_left)
-                a_loo_ts.append(a_loop_right)
-                all_crv_ts.append(a_loop_left)
-                all_crv_ts.append(a_loop_right)
+            #     a_surf = gmsh.model.occ.addPlaneSurface(wireTags=[a_loop_left], tag=SFs.pop(0))
+            #     a_srf_ts.append(a_surf)
+            #     a_surf = gmsh.model.occ.addPlaneSurface(wireTags=[a_loop_right], tag=SFs.pop(0))
+            #     a_srf_ts.append(a_surf)
 
-                left_curves.append(a_loop_left)
-                right_curves.append(a_loop_right)
+            #     # gmsh.model.occ.synchronize()
+            #     # gmsh.model.addPhysicalGroup(
+            #     #     dim=MESH_DIM-1, tags=[a_surf], tag=PYs.pop(0), name="a_band_" + str((i+1)*1+(0+k+2))
+            #     # )
 
-            else:
+            #     a_crv_ts.append(a_band_left)
+            #     a_crv_ts.append(a_band_right)
+            #     a_crv_ts.append(a_band_left_line)
+            #     a_crv_ts.append(a_band_right_line)
+
+            #     a_loo_ts.append(a_loop_left)
+            #     a_loo_ts.append(a_loop_right)
+            #     all_crv_ts.append(a_loop_left)
+            #     all_crv_ts.append(a_loop_right)
+
+            #     left_curves.append(a_loop_left)
+            #     right_curves.append(a_loop_right)
+
+            # else:
 
                 for k in range(0, len(GEOMS[d]["a"]), 1):
                     pt = gmsh.model.occ.addPoint(
                         x=GEOMS[d]["a"][k][0], y=0, z=SARC_L*d + SARC_L//2, 
-                        tag=PTs.pop(0), meshSize=MESH_R
+                         meshSize=MESH_R
                     )
                     a_pts.append(pt)
                     a_band = gmsh.model.occ.addCircle(
@@ -156,12 +156,6 @@ def create_gmsh_cylinder():
                     )
                     a_crv_ts.append(a_band)
                     a_loop = gmsh.model.occ.addCurveLoop(curveTags=[a_band], tag=CVs.pop(0))
-                    # a_surf = gmsh.model.occ.addPlaneSurface(wireTags=[a_loop], tag=SFs.pop(0))
-                    # a_srf_ts.append(a_surf)
-                    # gmsh.model.occ.synchronize()
-                    # gmsh.model.addPhysicalGroup(
-                    #     dim=MESH_DIM-1, tags=[a_surf], tag=PYs.pop(0), name="a_band_" + str((i+1)*1+(j+k+2))
-                    # )
                     a_loo_ts.append(a_loop)
                     all_crv_ts.append(a_loop)
 
@@ -172,6 +166,79 @@ def create_gmsh_cylinder():
                     elif k == 1:
                         right_curves.append(a_loop)
     
+    
+    # first = ide_curves.copy()
+    # first.append(left_curves[0])
+    a = gmsh.model.occ.addThruSections(wireTags=ide_curves, tag=11111, makeSolid=True, makeRuled=True)
+    b = gmsh.model.occ.addThruSections(wireTags=[ide_curves[-1]] + left_curves, tag=22222, makeSolid=True, makeRuled=True)
+    c = gmsh.model.occ.addThruSections(wireTags=[ide_curves[-1]] + right_curves, tag=33333, makeSolid=True, makeRuled=True)
+    # # print(a, b, c)
+    # gmsh.model.occ.synchronize()
+    # d = gmsh.model.occ.fuse([(2, 18)], [(2, 31)], removeObject=True, removeTool=True)
+    # print(d)
+    # gmsh.model.occ.synchronize()
+    # new = gmsh.model.occ.copy([(2,1)])
+    # new = gmsh.model.occ.copy([(2,3)])
+    # new = gmsh.model.occ.copy([(2,4)])
+    # new = gmsh.model.occ.copy([(2,5)])
+    gmsh.model.occ.remove(a, recursive=False)
+    gmsh.model.occ.remove(b, recursive=False)
+    gmsh.model.occ.remove(c, recursive=False)
+    d = gmsh.model.occ.fuse([(2, 18)], [(2, 31)], removeObject=True, removeTool=True)
+    # gmsh.model.occ.remove([(2, 18)], recursive=False)
+    # gmsh.model.occ.remove([(2, 31)], recursive=False)
+    # gmsh.model.occ.remove([(2, 48)], recursive=False)
+    # gmsh.model.occ.remove([(2, 45)], recursive=False)
+    # gmsh.model.occ.remove([(2, 44)], recursive=False)
+    # gmsh.model.occ.remove([(2, 17)], recursive=False)
+    # gmsh.model.occ.remove([(2, 29)], recursive=False)
+    # gmsh.model.occ.remove([(2, 42)], recursive=False)
+    # gmsh.model.occ.synchronize()
+    # # gmsh.model.occ.synchronize()
+    gmsh.model.occ.synchronize()
+    # sf = [16, 1, 2, 3, 4,5, 6, 7, 8, 9, 10,11, 12, 13, 14, 15] #, 46, 47,
+        #   19, 20,21,22,23,24,25,26,27,28,30,
+        #   33,34,35,36,37,38,39,40,41,43]
+
+    # gmsh.model.occ.remove([(2, 17)], recursive=False) 
+    # gmsh.model.occ.remove([(2, 42)], recursive=False) 
+    gmsh.model.occ.remove([(2, 29)], recursive=False) 
+    gmsh.model.occ.remove([(2, 48)], recursive=False) 
+    gmsh.model.occ.remove([(2, 45)], recursive=False) 
+    gmsh.model.occ.remove([(2, 44)], recursive=False) 
+    gmsh.model.occ.remove([(2, 42)], recursive=False) 
+    ideal = list(range(1, 17, 1))# + [44, 45, 48]
+    # gmsh.model.occ.fuse([(2, 15)], [(2, 44), (2, 45), (2, 48)], removeObject=True, removeTool=True)
+    # ideal_sl = gmsh.model.occ.addSurfaceLoop(ideal, sewing=True)
+    # ideal_vol = gmsh.model.occ.addVolume([ideal_sl])
+
+    gmsh.model.occ.synchronize()
+
+    
+    gmsh.model.occ.fuse([(2, 15)], [(2, 46), (2, 47)], removeObject=True, removeTool=True)
+    branch = list(range(19, 29, 1)) + [30] + list(range(32, 42, 1)) + [43, 48, 47]
+    # gmsh.model.occ.fuse([(2, 15)], [(2, 44), (2, 45), (2, 48)], removeObject=True, removeTool=True)
+    # gmsh.model.occ.fuse([(2, 15)], [(2, 44), (2, 45), (2, 48)], removeObject=True, removeTool=True)
+    branch_sl = gmsh.model.occ.addSurfaceLoop(ideal+branch, sewing=True)
+    branch_vol = gmsh.model.occ.addVolume([branch_sl])
+
+    gmsh.model.occ.synchronize()
+
+    # gmsh.model.occ.fuse([(3, 1)], [(3, 2)], removeObject=True, removeTool=True)
+    # # exit()
+    # print(e)
+    # exit()
+    # exit()
+    # # d = gmsh.model.occ.fuse(b, c, removeObject=True, removeTool=True)
+    # gmsh.model.occ.cut(b, c)
+
+    # e = gmsh.model.occ.fuse(b, d[0])
+    # print(e)
+    # exit()
+    # gmsh.model.occ.cut(b, c)
+
+    gmsh.model.occ.synchronize()
+
     # sarcomere = []
     # for i in range(0, len(a_loo_ts), 1):
     #     sarcomere.append([z_loo_ts[i], a_loo_ts[i], z_loo_ts[i+1]])
@@ -198,7 +265,7 @@ def create_gmsh_cylinder():
     
 
     # += Create Mesh
-    gmsh.model.mesh.generate(2)
+    gmsh.model.mesh.generate(3)
     gmsh.model.mesh.refine()
     gmsh.model.mesh.setOrder(2)
     # += Write File
