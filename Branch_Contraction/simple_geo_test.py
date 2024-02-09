@@ -20,7 +20,7 @@ import ufl
 MESH_DIM = 3
 ORDER = 2
 X, Y, Z = 0, 1, 2
-LAMBDA = -0.10*65000
+LAMBDA = -0.02*65000
 ROT = 0
 Z_DISCS = 14
 SARC_N = 7
@@ -110,12 +110,13 @@ def create_gmsh_cylinder():
             z_loop = gmsh.model.occ.addCurveLoop(curveTags=[z_disc], tag=CVs.pop(0))
             z_loo_ts.append(z_loop)
             all_crv_ts.append(z_loop)
-            if i < 8:
-                ide_curves.append(z_loop)
-            elif j == 0:
-                left_curves.append(z_loop)
-            elif j == 1:
-                right_curves.append(z_loop)
+            ide_curves.append(z_loop)
+            # if i < 8:
+            #     ide_curves.append(z_loop)
+            # elif j == 0:
+            #     left_curves.append(z_loop)
+            # elif j == 1:
+            #     right_curves.append(z_loop)
 
 
         if i < Z_DISCS-1:
@@ -178,19 +179,21 @@ def create_gmsh_cylinder():
                     a_loo_ts.append(a_loop)
                     all_crv_ts.append(a_loop)
 
-                    if i < 8:
-                        ide_curves.append(a_loop)
-                    elif k == 0:
-                        left_curves.append(a_loop)
-                    elif k == 1:
-                        right_curves.append(a_loop)
+                    ide_curves.append(a_loop)
+
+                    # if i < 8:
+                    #     ide_curves.append(a_loop)
+                    # elif k == 0:
+                    #     left_curves.append(a_loop)
+                    # elif k == 1:
+                    #     right_curves.append(a_loop)
     
     
     # first = ide_curves.copy()
     # first.append(left_curves[0])
     a = gmsh.model.occ.addThruSections(wireTags=ide_curves, tag=11111, makeSolid=True, makeRuled=True)
-    b = gmsh.model.occ.addThruSections(wireTags=[ide_curves[-1]] + left_curves, tag=22222, makeSolid=True, makeRuled=True)
-    c = gmsh.model.occ.addThruSections(wireTags=[ide_curves[-1]] + right_curves, tag=33333, makeSolid=True, makeRuled=True)
+    # b = gmsh.model.occ.addThruSections(wireTags=[ide_curves[-1]] + left_curves, tag=22222, makeSolid=True, makeRuled=True)
+    # c = gmsh.model.occ.addThruSections(wireTags=[ide_curves[-1]] + right_curves, tag=33333, makeSolid=True, makeRuled=True)
     # # print(a, b, c)
     # gmsh.model.occ.synchronize()
     # d = gmsh.model.occ.fuse([(2, 18)], [(2, 31)], removeObject=True, removeTool=True)
@@ -200,10 +203,11 @@ def create_gmsh_cylinder():
     # new = gmsh.model.occ.copy([(2,3)])
     # new = gmsh.model.occ.copy([(2,4)])
     # new = gmsh.model.occ.copy([(2,5)])
-    gmsh.model.occ.remove(a, recursive=False)
-    gmsh.model.occ.remove(b, recursive=False)
-    gmsh.model.occ.remove(c, recursive=False)
-    d = gmsh.model.occ.fuse([(2, 18)], [(2, 31)], removeObject=True, removeTool=True)
+    #####
+    # gmsh.model.occ.remove(a, recursive=False)
+    # gmsh.model.occ.remove(b, recursive=False)
+    # gmsh.model.occ.remove(c, recursive=False)
+    # d = gmsh.model.occ.fuse([(2, 18)], [(2, 31)], removeObject=True, removeTool=True)
     # gmsh.model.occ.remove([(2, 18)], recursive=False)
     # gmsh.model.occ.remove([(2, 31)], recursive=False)
     # gmsh.model.occ.remove([(2, 48)], recursive=False)
@@ -221,27 +225,29 @@ def create_gmsh_cylinder():
 
     # gmsh.model.occ.remove([(2, 17)], recursive=False) 
     # gmsh.model.occ.remove([(2, 42)], recursive=False) 
-    gmsh.model.occ.remove([(2, 29)], recursive=False) 
-    gmsh.model.occ.remove([(2, 48)], recursive=False) 
-    gmsh.model.occ.remove([(2, 45)], recursive=False) 
-    gmsh.model.occ.remove([(2, 44)], recursive=False) 
-    gmsh.model.occ.remove([(2, 42)], recursive=False) 
-    ideal = list(range(1, 17, 1))# + [44, 45, 48]
+    ########
+    # gmsh.model.occ.remove([(2, 29)], recursive=False) 
+    # gmsh.model.occ.remove([(2, 48)], recursive=False) 
+    # gmsh.model.occ.remove([(2, 45)], recursive=False) 
+    # gmsh.model.occ.remove([(2, 44)], recursive=False) 
+    # gmsh.model.occ.remove([(2, 42)], recursive=False) 
+    # ideal = list(range(1, 17, 1))# + [44, 45, 48]
+
     # gmsh.model.occ.fuse([(2, 15)], [(2, 44), (2, 45), (2, 48)], removeObject=True, removeTool=True)
     # ideal_sl = gmsh.model.occ.addSurfaceLoop(ideal, sewing=True)
     # ideal_vol = gmsh.model.occ.addVolume([ideal_sl])
 
-    gmsh.model.occ.synchronize()
+    # gmsh.model.occ.synchronize()
 
-    
-    gmsh.model.occ.fuse([(2, 15)], [(2, 46), (2, 47)], removeObject=True, removeTool=True)
-    branch = list(range(19, 29, 1)) + [30] + list(range(32, 42, 1)) + [43, 48, 47]
-    # gmsh.model.occ.fuse([(2, 15)], [(2, 44), (2, 45), (2, 48)], removeObject=True, removeTool=True)
-    # gmsh.model.occ.fuse([(2, 15)], [(2, 44), (2, 45), (2, 48)], removeObject=True, removeTool=True)
-    branch_sl = gmsh.model.occ.addSurfaceLoop(ideal+branch, sewing=True)
-    branch_vol = gmsh.model.occ.addVolume([branch_sl])
+    ##########
+    # gmsh.model.occ.fuse([(2, 15)], [(2, 46), (2, 47)], removeObject=True, removeTool=True)
+    # branch = list(range(19, 29, 1)) + [30] + list(range(32, 42, 1)) + [43, 48, 47]
+    # # gmsh.model.occ.fuse([(2, 15)], [(2, 44), (2, 45), (2, 48)], removeObject=True, removeTool=True)
+    # # gmsh.model.occ.fuse([(2, 15)], [(2, 44), (2, 45), (2, 48)], removeObject=True, removeTool=True)
+    # branch_sl = gmsh.model.occ.addSurfaceLoop(ideal+branch, sewing=True)
+    # branch_vol = gmsh.model.occ.addVolume([branch_sl])
 
-    gmsh.model.occ.synchronize()
+    # gmsh.model.occ.synchronize()
 
     # gmsh.model.occ.fuse([(3, 1)], [(3, 2)], removeObject=True, removeTool=True)
     # # exit()
@@ -281,9 +287,11 @@ def create_gmsh_cylinder():
     # sl = gmsh.model.occ.addSurfaceLoop([1, 2, 4, 6])
     # gmsh.model.occ.addVolume([sl])
 
-    gmsh.model.addPhysicalGroup(3, [1], name="Myo_Vol")
-    gmsh.model.addPhysicalGroup(2, [16], name="Myo_Base")
-    gmsh.model.addPhysicalGroup(2, [30, 43 ], name="Sarc_Top")
+    gmsh.model.addPhysicalGroup(3, [11111], name="Myo_Vol")
+    gmsh.model.addPhysicalGroup(2, [27], name="Myo_Base")
+    gmsh.model.addPhysicalGroup(2, [28], name="Sarc_Top")
+    # gmsh.model.addPhysicalGroup(2, [16], name="Myo_Base")
+    # gmsh.model.addPhysicalGroup(2, [30, 43 ], name="Sarc_Top")
     # gmsh.model.addPhysicalGroup(2, [ide], name="Sarc_" + str(k) + "_b")
     gmsh.model.occ.synchronize()
     
