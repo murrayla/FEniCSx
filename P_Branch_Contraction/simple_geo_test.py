@@ -25,41 +25,6 @@ ROT = 0
 Z_DISCS = 14
 SARC_N = 7
 FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "z0": 5, "z1": 6, "area": 7}
-GEOMS = {
-    0: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    1: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    2: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    3: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    4: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    5: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    6: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-    7: {"z": [[0, 0, 1900]], "a": [[0, 0, 2608]]},
-
-
-    8: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]},
-    9: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]},
-    10: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]},
-    11: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]},
-    12: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]},
-    13: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]}
-}
-# GEOMS = {
-#     0: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-#     1: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-#     2: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-#     3: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-#     4: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-#     5: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-#     6: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-#     7: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-#     8: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-#     9: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-#     10: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-#     11: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-#     12: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-#     13: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
-# }
-
 SARC_L = 5000
 MESH_R = 10000
 PTs = list(range(100001, 100001+(Z_DISCS*20), 5))
@@ -74,7 +39,43 @@ GCC_CONS = [0.5, 1, 1, 1]
 # +==+==+==+
 # Gmsh Function for constructing idealised geometry
 # +==+==+==+
-def create_gmsh_cylinder():
+def create_gmsh_cylinder(test):
+    
+    if test == 0:
+        GEOMS = {
+            0: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            1: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            2: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            3: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            4: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            5: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            6: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            7: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            8: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            9: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            10: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            11: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            12: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            13: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+        }
+    elif test == 1:
+        GEOMS = {
+            0: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            1: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            2: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            3: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            4: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            5: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            6: {"z": [[0, 0, 1800]], "a": [[0, 0, 2566]]},
+            7: {"z": [[0, 0, 1900]], "a": [[0, 0, 2608]]},
+            8: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]},
+            9: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]},
+            10: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]},
+            11: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]},
+            12: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]},
+            13: {"z": [[-2326, 0, 1100], [1772, 0, 800]], "a": [[-2326, 0, 2325], [1772, 0, 1771]]}
+        }
+
     # +==+==+
     # Initialise and begin geometry
     gmsh.initialize()
@@ -85,17 +86,12 @@ def create_gmsh_cylinder():
     a_crv_ts = []
     z_loo_ts = []
     a_loo_ts = []
-    z_srf_ts = []
-    a_srf_ts = []
     all_crv_ts = []
-    all_srf_ts = []
-
     ide_curves = []
     left_curves = []
     right_curves = []
     
     for i, d in enumerate(GEOMS.keys()):
-        print(i, d)
         for j in range(0, len(GEOMS[d]["z"]), 1):
             pt = gmsh.model.occ.addPoint(
                 x=GEOMS[d]["z"][j][0], y=0, z=SARC_L*d, 
@@ -110,14 +106,16 @@ def create_gmsh_cylinder():
             z_loop = gmsh.model.occ.addCurveLoop(curveTags=[z_disc], tag=CVs.pop(0))
             z_loo_ts.append(z_loop)
             all_crv_ts.append(z_loop)
-            # ide_curves.append(z_loop)
-            if i < 8:
-                ide_curves.append(z_loop)
-            elif j == 0:
-                left_curves.append(z_loop)
-            elif j == 1:
-                right_curves.append(z_loop)
 
+            if test == 0:
+                ide_curves.append(z_loop)
+            elif test == 1:
+                if i < 8:
+                    ide_curves.append(z_loop)
+                elif j == 0:
+                    left_curves.append(z_loop)
+                elif j == 1:
+                    right_curves.append(z_loop)
 
         if i < Z_DISCS-1:
 
@@ -136,74 +134,61 @@ def create_gmsh_cylinder():
                 a_loo_ts.append(a_loop)
                 all_crv_ts.append(a_loop)
 
-                # ide_curves.append(a_loop)
-
-                ########
-                if i < 8:
+                if test == 0: 
                     ide_curves.append(a_loop)
-                elif k == 0:
-                    left_curves.append(a_loop)
-                elif k == 1:
-                    right_curves.append(a_loop)
-                ########
+                elif test == 1:
+                    if i < 8:
+                        ide_curves.append(a_loop)
+                    elif k == 0:
+                        left_curves.append(a_loop)
+                    elif k == 1:
+                        right_curves.append(a_loop)
     
     
     a = gmsh.model.occ.addThruSections(wireTags=ide_curves, tag=11111, makeSolid=True, makeRuled=True)
 
-    # ########
-    b = gmsh.model.occ.addThruSections(wireTags=[ide_curves[-1]] + left_curves, tag=22222, makeSolid=True, makeRuled=True)
-    c = gmsh.model.occ.addThruSections(wireTags=[ide_curves[-1]] + right_curves, tag=33333, makeSolid=True, makeRuled=True)
-    # ########
-
-    # ########
-    gmsh.model.occ.remove(a, recursive=False)
-    gmsh.model.occ.remove(b, recursive=False)
-    gmsh.model.occ.remove(c, recursive=False)
-    d = gmsh.model.occ.fuse([(2, 18)], [(2, 31)], removeObject=True, removeTool=True)
-    # ########
-
-    # ########
-    gmsh.model.occ.synchronize()
-    gmsh.model.occ.remove([(2, 29)], recursive=False) 
-    gmsh.model.occ.remove([(2, 48)], recursive=False) 
-    gmsh.model.occ.remove([(2, 45)], recursive=False) 
-    gmsh.model.occ.remove([(2, 44)], recursive=False) 
-    gmsh.model.occ.remove([(2, 42)], recursive=False) 
-    ideal = list(range(1, 17, 1))
-    # ##########
+    if test == 1:
+        b = gmsh.model.occ.addThruSections(wireTags=[ide_curves[-1]] + left_curves, tag=22222, makeSolid=True, makeRuled=True)
+        c = gmsh.model.occ.addThruSections(wireTags=[ide_curves[-1]] + right_curves, tag=33333, makeSolid=True, makeRuled=True)
+        gmsh.model.occ.remove(a, recursive=False)
+        gmsh.model.occ.remove(b, recursive=False)
+        gmsh.model.occ.remove(c, recursive=False)
+        d = gmsh.model.occ.fuse([(2, 18)], [(2, 31)], removeObject=True, removeTool=True)
+        gmsh.model.occ.synchronize()
+        gmsh.model.occ.remove([(2, 29)], recursive=False) 
+        gmsh.model.occ.remove([(2, 48)], recursive=False) 
+        gmsh.model.occ.remove([(2, 45)], recursive=False) 
+        gmsh.model.occ.remove([(2, 44)], recursive=False) 
+        gmsh.model.occ.remove([(2, 42)], recursive=False) 
+        ideal = list(range(1, 17, 1))
 
     gmsh.model.occ.synchronize()
 
-    # ##########
-    gmsh.model.occ.fuse([(2, 15)], [(2, 46), (2, 47)], removeObject=True, removeTool=True)
-    branch = list(range(19, 29, 1)) + [30] + list(range(32, 42, 1)) + [43, 48, 47]
-    branch_sl = gmsh.model.occ.addSurfaceLoop(ideal+branch, sewing=True)
-    branch_vol = gmsh.model.occ.addVolume([branch_sl])
-    gmsh.model.occ.synchronize()
-    # ##########
+    if test == 1:
+        gmsh.model.occ.fuse([(2, 15)], [(2, 46), (2, 47)], removeObject=True, removeTool=True)
+        branch = list(range(19, 29, 1)) + [30] + list(range(32, 42, 1)) + [43, 48, 47]
+        branch_sl = gmsh.model.occ.addSurfaceLoop(ideal+branch, sewing=True)
+        branch_vol = gmsh.model.occ.addVolume([branch_sl])
+        gmsh.model.occ.synchronize()
 
-    # $%&
-    # gmsh.model.addPhysicalGroup(3, [11111], name="Myo_Vol")
-    # gmsh.model.addPhysicalGroup(2, [27], name="Myo_Base")
-    # gmsh.model.addPhysicalGroup(2, [28], name="Sarc_Top")
-    # $%2
+    if test == 0:
+        gmsh.model.addPhysicalGroup(3, [11111], name="Myo_Vol")
+        gmsh.model.addPhysicalGroup(2, [27], name="Myo_Base")
+        gmsh.model.addPhysicalGroup(2, [28], name="Sarc_Top")
 
-    ######
-    gmsh.model.addPhysicalGroup(3, [1], name="Myo_Vol")
-    gmsh.model.addPhysicalGroup(2, [16], name="Myo_Base")
-    gmsh.model.addPhysicalGroup(2, [30, 43 ], name="Sarc_Top")
-    #######
-
+    if test == 1:
+        gmsh.model.addPhysicalGroup(3, [1], name="Myo_Vol")
+        gmsh.model.addPhysicalGroup(2, [16], name="Myo_Base")
+        gmsh.model.addPhysicalGroup(2, [30, 43 ], name="Sarc_Top")
 
     gmsh.model.occ.synchronize()
     
-
     # += Create Mesh
     gmsh.model.mesh.generate(3)
-    # gmsh.model.mesh.refine()
+    gmsh.model.mesh.refine()
     gmsh.model.mesh.setOrder(2)
     # += Write File
-    gmsh.write("Branch_Contraction/gmsh_msh/" + test_name + ".msh")
+    gmsh.write("P_Branch_Contraction/gmsh_msh/" + test_name + ".msh")
     gmsh.finalize()
 
 # +==+==+==+
@@ -213,12 +198,12 @@ def create_gmsh_cylinder():
 #       (1): elem_order | int | Order of elements to generate
 #   Outputs:
 #       (0): .bp folder of contracted unit square
-def main(test_name, quad_order):
+def main(test_name, quad_order, test_type):
     # +==+==+
     # Setup problem space
-    create_gmsh_cylinder()
+    create_gmsh_cylinder(test_type)
     
-    file = "Branch_Contraction/gmsh_msh/" + test_name + ".msh"
+    file = "P_Branch_Contraction/gmsh_msh/" + test_name + ".msh"
     domain, _, ft = io.gmshio.read_from_msh(file, MPI.COMM_WORLD, 0, gdim=MESH_DIM)
     # ft.name = "Facet markers"
     # domain = mesh.create_unit_cube(comm=MPI.COMM_WORLD, nx=X_ELS, ny=Y_ELS, nz=Z_ELS, cell_type=mesh.CellType.hexahedron)
@@ -354,11 +339,11 @@ def main(test_name, quad_order):
 
     # print(u_sol.x.array[x0_dofs_x])
 
-    # +==+==+
-    # ParaView export
-    with io.VTXWriter(MPI.COMM_WORLD, test_name + ".bp", w.sub(0).collapse(), engine="BP4") as vtx:
-        vtx.write(0.0)
-        vtx.close()
+    # # +==+==+
+    # # ParaView export
+    # with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ".bp", w.sub(0).collapse(), engine="BP4") as vtx:
+    #     vtx.write(0.0)
+    #     vtx.close()
 
     # # +==+==+
     # # Variational Problem Setup
@@ -438,45 +423,45 @@ def main(test_name, quad_order):
     #     print(f"Not converged after {num_its} iterations.")
     # u_sol, p_sol = w.split()
 
-    # # +==+==+
-    # # Interpolate Stress
-    # #    (0): Function for calculating cauchy stress
-    # def cauchy(u, p):
-    #     print(u.x.array)
-    #     i = ufl.Identity(MESH_DIM)
-    #     f = i + ufl.grad(u)
-    #     c = f.T * f
-    #     e = 0.5 * (c - i)
-    #     j = ufl.det(f)
-    #     q = (
-    #         GCC_CONS[1] * e[0,0]**2 + 
-    #         GCC_CONS[2] * (e[1,1]**2 + e[2,2]**2 + 2*(e[1,2] + e[2,1])) + 
-    #         GCC_CONS[3] * (2*e[0,1]*e[1,0] + 2*e[0,2]*e[2,0])
-    #     )
-    #     s = GCC_CONS[0]/4 * ufl.exp(q) * ufl.as_matrix([
-    #         [4*GCC_CONS[1]*e[0,0], 2*GCC_CONS[3]*(e[1,0] + e[0,1]), 2*GCC_CONS[3]*(e[2,0] + e[0,2])],
-    #         [2*GCC_CONS[3]*(e[0,1] + e[1,0]), 4*GCC_CONS[2]*e[1,1], 2*GCC_CONS[2]*(e[2,1] + e[1,2])],
-    #         [2*GCC_CONS[3]*(e[0,2] + e[2,0]), 2*GCC_CONS[2]*(e[1,2] + e[2,1]), 4*GCC_CONS[3]*e[2,2]],
-    #     ]) - p * ufl.inv(c)
-    #     sig = 1/j * f*s*f.T
-    #     return sig
+    # +==+==+
+    # Interpolate Stress
+    #    (0): Function for calculating cauchy stress
+    def cauchy(u, p):
+        print(u.x.array)
+        i = ufl.Identity(MESH_DIM)
+        f = i + ufl.grad(u)
+        c = f.T * f
+        e = 0.5 * (c - i)
+        j = ufl.det(f)
+        q = (
+            GCC_CONS[1] * e[0,0]**2 + 
+            GCC_CONS[2] * (e[1,1]**2 + e[2,2]**2 + 2*(e[1,2] + e[2,1])) + 
+            GCC_CONS[3] * (2*e[0,1]*e[1,0] + 2*e[0,2]*e[2,0])
+        )
+        s = GCC_CONS[0]/4 * ufl.exp(q) * ufl.as_matrix([
+            [4*GCC_CONS[1]*e[0,0], 2*GCC_CONS[3]*(e[1,0] + e[0,1]), 2*GCC_CONS[3]*(e[2,0] + e[0,2])],
+            [2*GCC_CONS[3]*(e[0,1] + e[1,0]), 4*GCC_CONS[2]*e[1,1], 2*GCC_CONS[2]*(e[2,1] + e[1,2])],
+            [2*GCC_CONS[3]*(e[0,2] + e[2,0]), 2*GCC_CONS[2]*(e[1,2] + e[2,1]), 4*GCC_CONS[3]*e[2,2]],
+        ]) - p * ufl.inv(c)
+        sig = 1/j * f*s*f.T
+        return sig
     
-    # TS = fem.FunctionSpace(domain, ("CG", 2, (3, 3)))
-    # piola_expr = fem.Expression(cauchy(u_sol, p_sol), TS.element.interpolation_points())
-    # sig = fem.Function(TS)
-    # sig.interpolate(piola_expr)
+    TS = fem.FunctionSpace(domain, ("CG", 2, (3, 3)))
+    piola_expr = fem.Expression(cauchy(u_sol, p_sol), TS.element.interpolation_points())
+    sig = fem.Function(TS)
+    sig.interpolate(piola_expr)
 
-    # # += Export
-    # strains = w.sub(0).collapse()
-    # strains.name = "strains"
-    # stresses = sig
-    # stresses.name = "stresses"
-    # with io.VTXWriter(MPI.COMM_WORLD, "Branch_Contraction/paraview_bp/" + test_name + "_strains.bp", strains, engine="BP4") as vtx:
-    #     vtx.write(0.0)
-    #     vtx.close()
-    # with io.VTXWriter(MPI.COMM_WORLD, "Branch_Contraction/paraview_bp/" + test_name + "_stresses.bp", stresses, engine="BP4") as vtx:
-    #     vtx.write(0.0)
-    #     vtx.close()
+    # += Export
+    strains = w.sub(0).collapse()
+    strains.name = "strains"
+    stresses = sig
+    stresses.name = "stresses"
+    with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + "_strains.bp", strains, engine="BP4") as vtx:
+        vtx.write(0.0)
+        vtx.close()
+    with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + "_stresses.bp", stresses, engine="BP4") as vtx:
+        vtx.write(0.0)
+        vtx.close()
     
 # +==+==+
 # Main check for script operation.
@@ -484,8 +469,10 @@ def main(test_name, quad_order):
 if __name__ == '__main__':
     # +==+ Test Parameters
     # += Test name
-    test_name = "CONF_TEST_BRANCH0900"
+    test_name = "TEST_QUICK_BRANCH"
     # += Quadature Degree
     quad_order = 4
+    # += Test Type
+    test_type = 1
     # += Feed Main()
-    main(test_name, quad_order)
+    main(test_name, quad_order, test_type)
