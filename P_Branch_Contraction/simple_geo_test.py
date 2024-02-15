@@ -14,13 +14,14 @@ from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
 from mpi4py import MPI
 import numpy as np
+import math
 import gmsh
 import ufl
 # += Parameters
 MESH_DIM = 3
 ORDER = 2
 X, Y, Z = 0, 1, 2
-LAMBDA = -900 #-0.02*65000
+LAMBDA = -math.ceil(0.08*65000)
 ROT = 0
 Z_DISCS = 14
 SARC_N = 7
@@ -201,9 +202,12 @@ def create_gmsh_cylinder(test):
 def main(test_name, quad_order, test_type):
     # +==+==+
     # Setup problem space
-    create_gmsh_cylinder(test_type)
     
-    file = "P_Branch_Contraction/gmsh_msh/" + test_name + ".msh"
+    # create_gmsh_cylinder(test_type)
+    if test_type == 0:
+        file = "P_Branch_Contraction/gmsh_msh/" + "myo_ideal_refSO" + ".msh"
+    elif test_type == 1:
+        file = "P_Branch_Contraction/gmsh_msh/" + "myo_branch_refSO" + ".msh"
     domain, _, ft = io.gmshio.read_from_msh(file, MPI.COMM_WORLD, 0, gdim=MESH_DIM)
     # ft.name = "Facet markers"
     # domain = mesh.create_unit_cube(comm=MPI.COMM_WORLD, nx=X_ELS, ny=Y_ELS, nz=Z_ELS, cell_type=mesh.CellType.hexahedron)
@@ -228,8 +232,8 @@ def main(test_name, quad_order, test_type):
     x1_facets = mesh.locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[0], 1))
     y0_facets = mesh.locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[1], 0))
     y1_facets = mesh.locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[1], 1))
-    z0_facets = mesh.locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[2], 0))
-    z1_facets = mesh.locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[2], 65000))
+    z0_facets = mesh.locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[2], np.min(x[2])))
+    z1_facets = mesh.locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[2], np.max(x[2])))
     # += Collate facets into stack
     mfacets = np.hstack([x0_facets, x1_facets, y0_facets, y1_facets, z0_facets, z1_facets])
     # += Assign boundaries IDs in stack
@@ -245,73 +249,27 @@ def main(test_name, quad_order, test_type):
     sfacets = np.argsort(mfacets)
     ft = mesh.meshtags(mesh=domain, dim=fdim, entities=mfacets[sfacets], values=mvalues[sfacets])
 
-    # +==+==+ 
-    # Boundary Conditions
-    # +==+ [x0]
-    x0_dofs_x = fem.locate_dofs_topological((W.sub(0).sub(X), Vx), ft.dim, z0_facets)
-    u0_bc_x = fem.Function(Vx)
-    u0_bc_x.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
-    bc_x0_x = fem.dirichletbc(u0_bc_x, x0_dofs_x, W.sub(0).sub(X))
-    # +==+ [y0]
-    y0_dofs_y = fem.locate_dofs_topological((W.sub(0).sub(Y), Vy), ft.dim, z0_facets)
-    u0_bc_y = fem.Function(Vy)
-    u0_bc_y.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
-    bc_y0_y = fem.dirichletbc(u0_bc_y, y0_dofs_y, W.sub(0).sub(Y))
-    # +==+ [z0]
-    z0_dofs_z = fem.locate_dofs_topological((W.sub(0).sub(Z), Vz), ft.dim, z0_facets)
-    u0_bc_z = fem.Function(Vz)
-    u0_bc_z.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-LAMBDA)))
-    bc_z0_z = fem.dirichletbc(u0_bc_z, z0_dofs_z, W.sub(0).sub(Z))
-    # +==+ [x1]
-    x1_dofs_x = fem.locate_dofs_topological((W.sub(0).sub(X), Vx), ft.dim, z1_facets)
-    u1_bc_x = fem.Function(Vx)
-    u1_bc_x.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
-    bc_x1_x = fem.dirichletbc(u1_bc_x, x1_dofs_x, W.sub(0).sub(X))
-    # +==+ [y1]
-    y1_dofs_y = fem.locate_dofs_topological((W.sub(0).sub(Y), Vy), ft.dim, z1_facets)
-    u1_bc_y = fem.Function(Vy)
-    u1_bc_y.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
-    bc_y1_y = fem.dirichletbc(u1_bc_y, y1_dofs_y, W.sub(0).sub(Y))
-    # +==+ [z1]
-    z1_dofs_z = fem.locate_dofs_topological((W.sub(0).sub(Z), Vz), ft.dim, z1_facets)
-    u1_bc_z = fem.Function(Vz)
-    u1_bc_z.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(LAMBDA)))
-    bc_z1_z = fem.dirichletbc(u1_bc_z, z1_dofs_z, W.sub(0).sub(Z))
-    # +==+ BC Concatenate
-    bc = [bc_x0_x, bc_y0_y, bc_z0_z, bc_x1_x, bc_y1_y, bc_z1_z]
-    # bc = [bc_z0_z, bc_z1_z]
-
     # +==+==+
     # Setup Parameteres for Variational Equation
     # += Test and Trial Functions
     v, q = ufl.TestFunctions(W)
     u, p = ufl.split(w)
-    # # += Identity Tensor
+    i, j, k = ufl.indices(3)
     I = ufl.variable(ufl.Identity(MESH_DIM))
-    # += Deformation Gradient Tensor
-    #    F = ∂u/∂X + I
-    F = ufl.variable(I + ufl.grad(u))
-    # += Right Cauchy-Green Tensor
-    C = ufl.variable(F.T * F)
-    # += Invariants
-    #    (1): λ1^2 + λ2^2 + λ3^2; tr(C)
-    Ic = ufl.variable(ufl.tr(C))
-    #    (2): λ1^2*λ2^2 + λ2^2*λ3^2 + λ3^2*λ1^2; 0.5*[(tr(C)^2 - tr(C^2)]
-    IIc = ufl.variable((Ic**2 - ufl.inner(C,C))/2)
-    #    (3): λ1^2*λ2^2*λ3^2; det(C) = J^2
+    F = ufl.as_tensor(I[i, j] + ufl.grad(u)[i, j], [i, j])
+    C = ufl.variable(ufl.as_tensor(F[k, i]*F[k, j], [i, j]))
+    E = ufl.variable(ufl.as_tensor((0.5*(C[i,j] - I[i,j])), [i, j]))
     J = ufl.variable(ufl.det(F))
-    # IIIc = ufl.variable(ufl.det(C))
-    # += Material Parameters
-    c1 = 2
-    c2 = 6
-    # += Mooney-Rivlin Strain Energy Density Function
-    psi = c1 * (Ic - 3) + c2 *(IIc - 3) 
-    # Terms
-    gamma1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
-    gamma2 = -ufl.diff(psi, IIc)
-    # += First Piola Stress
-    firstPK = 2 * F * (gamma1*I + gamma2*C) + p * J * ufl.inv(F).T
-    cau = (1/J * firstPK * F).T
+    Q = (
+            GCC_CONS[1] * E[0,0]**2 + 
+            GCC_CONS[2] * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
+            GCC_CONS[3] * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
+        )
+    S = GCC_CONS[0]/4 * ufl.exp(Q) * ufl.as_matrix([
+        [4*GCC_CONS[1]*E[0,0], 2*GCC_CONS[3]*(E[1,0] + E[0,1]), 2*GCC_CONS[3]*(E[2,0] + E[0,2])],
+        [2*GCC_CONS[3]*(E[0,1] + E[1,0]), 4*GCC_CONS[2]*E[1,1], 2*GCC_CONS[2]*(E[2,1] + E[1,2])],
+        [2*GCC_CONS[3]*(E[0,2] + E[2,0]), 2*GCC_CONS[2]*(E[1,2] + E[2,1]), 4*GCC_CONS[3]*E[2,2]],
+    ]) - p * ufl.inv(C)
 
     # +==+==+
     # Setup Variational Problem Solver
@@ -320,148 +278,127 @@ def main(test_name, quad_order, test_type):
     # += Domains of integration
     dx = ufl.Measure("dx", domain=domain, metadata=metadata)
     # += Residual Equation (Variational, for solving)
-    R = ufl.inner(ufl.grad(v), firstPK) * dx + q * (J - 1) * dx
-    problem = NonlinearProblem(R, w, bc)
+    R = ufl.inner(ufl.grad(v), S) * dx + q * (J - 1) * dx
 
-    solver = NewtonSolver(domain.comm, problem)
-    # += Tolerances for convergence
-    solver.atol = 1e-4
-    solver.rtol = 1e-4
-    # += Convergence criteria
-    solver.convergence_criterion = "incremental"
+    lam = [0, -math.ceil(0.01*65000), -math.ceil(0.02*65000), -math.ceil(0.03*65000),
+           -math.ceil(0.04*65000), -math.ceil(0.05*65000), -math.ceil(0.06*65000),
+            -math.ceil(0.05*65000),
+           -math.ceil(0.04*65000), -math.ceil(0.03*65000), -math.ceil(0.02*65000), -math.ceil(0.01*65000), 0]
+    
+    # lam = [0, -math.ceil(0.01*65000)]
+    
+    Vu_sol, up_to_u_sol = W.sub(0).collapse() 
+    u_sol = fem.Function(Vu_sol) 
 
-    num_its, converged = solver.solve(w)
-    u_sol, p_sol = w.split()
-    if converged:
-        print(f"Converged in {num_its} iterations.")
-    else:
-        print(f"Not converged after {num_its} iterations.")
+    Vp_sol, up_to_p_sol = W.sub(1).collapse() 
+    p_sol = fem.Function(Vp_sol) 
+
+    u_sol.name = "disp"
+    p_sol.name = "pressure"
+
+    eps_file = io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + "_DISP_MOV.bp", u_sol, engine="BP4")
+    for i, d in enumerate(lam):
+       # +==+==+ 
+        # Boundary Conditions
+        # +==+ [x0]
+        x0_dofs_x = fem.locate_dofs_topological((W.sub(0).sub(X), Vx), ft.dim, z0_facets)
+        u0_bc_x = fem.Function(Vx)
+        u0_bc_x.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
+        bc_x0_x = fem.dirichletbc(u0_bc_x, x0_dofs_x, W.sub(0).sub(X))
+        # +==+ [y0]
+        y0_dofs_y = fem.locate_dofs_topological((W.sub(0).sub(Y), Vy), ft.dim, z0_facets)
+        u0_bc_y = fem.Function(Vy)
+        u0_bc_y.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
+        bc_y0_y = fem.dirichletbc(u0_bc_y, y0_dofs_y, W.sub(0).sub(Y))
+        # +==+ [z0]
+        z0_dofs_z = fem.locate_dofs_topological((W.sub(0).sub(Z), Vz), ft.dim, z0_facets)
+        u0_bc_z = fem.Function(Vz)
+        u0_bc_z.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-d)))
+        bc_z0_z = fem.dirichletbc(u0_bc_z, z0_dofs_z, W.sub(0).sub(Z))
+        # +==+ [x1]
+        x1_dofs_x = fem.locate_dofs_topological((W.sub(0).sub(X), Vx), ft.dim, z1_facets)
+        u1_bc_x = fem.Function(Vx)
+        u1_bc_x.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
+        bc_x1_x = fem.dirichletbc(u1_bc_x, x1_dofs_x, W.sub(0).sub(X))
+        # +==+ [y1]
+        y1_dofs_y = fem.locate_dofs_topological((W.sub(0).sub(Y), Vy), ft.dim, z1_facets)
+        u1_bc_y = fem.Function(Vy)
+        u1_bc_y.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
+        bc_y1_y = fem.dirichletbc(u1_bc_y, y1_dofs_y, W.sub(0).sub(Y))
+        # +==+ [z1]
+        z1_dofs_z = fem.locate_dofs_topological((W.sub(0).sub(Z), Vz), ft.dim, z1_facets)
+        u1_bc_z = fem.Function(Vz)
+        u1_bc_z.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(d)))
+        bc_z1_z = fem.dirichletbc(u1_bc_z, z1_dofs_z, W.sub(0).sub(Z))
+        # +==+ BC Concatenate
+        bc = [bc_x0_x, bc_y0_y, bc_z0_z, bc_x1_x, bc_y1_y, bc_z1_z]
+    
+        # += Nonlinear Solver
+        problem = NonlinearProblem(R, w, bc)
+        solver = NewtonSolver(domain.comm, problem)
+        # += Tolerances for convergence
+        solver.atol = 1e-4
+        solver.rtol = 1e-4
+        # += Convergence criteria
+        solver.convergence_criterion = "incremental"
+
+        num_its, converged = solver.solve(w)
+        # u_sol, p_sol = w.split()
+        print(i)
+        if converged:
+            print(f"Converged in {num_its} iterations.")
+        else:
+            print(f"Not converged after {num_its} iterations.")
+        num_its, converged = solver.solve(w)
+
+        u_eval = w.sub(0).collapse()
+        u_sol.interpolate(u_eval)
+
+        eps_file.write(i)
+
+    eps_file.close()
 
     # print(u_sol.x.array[x0_dofs_x])
 
     # # +==+==+
-    # # ParaView export
-    # with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ".bp", w.sub(0).collapse(), engine="BP4") as vtx:
+    # # Interpolate Stress
+    # #    (0): Function for calculating cauchy stress
+    # def cauchy(u, p):
+    #     print(u.x.array)
+    #     i = ufl.Identity(MESH_DIM)
+    #     f = i + ufl.grad(u)
+    #     c = f.T * f
+    #     e = 0.5 * (c - i)
+    #     j = ufl.det(f)
+    #     q = (
+    #         GCC_CONS[1] * e[0,0]**2 + 
+    #         GCC_CONS[2] * (e[1,1]**2 + e[2,2]**2 + 2*(e[1,2] + e[2,1])) + 
+    #         GCC_CONS[3] * (2*e[0,1]*e[1,0] + 2*e[0,2]*e[2,0])
+    #     )
+    #     s = GCC_CONS[0]/4 * ufl.exp(q) * ufl.as_matrix([
+    #         [4*GCC_CONS[1]*e[0,0], 2*GCC_CONS[3]*(e[1,0] + e[0,1]), 2*GCC_CONS[3]*(e[2,0] + e[0,2])],
+    #         [2*GCC_CONS[3]*(e[0,1] + e[1,0]), 4*GCC_CONS[2]*e[1,1], 2*GCC_CONS[2]*(e[2,1] + e[1,2])],
+    #         [2*GCC_CONS[3]*(e[0,2] + e[2,0]), 2*GCC_CONS[2]*(e[1,2] + e[2,1]), 4*GCC_CONS[3]*e[2,2]],
+    #     ]) - p * ufl.inv(c)
+    #     sig = 1/j * f*s*f.T
+    #     return sig
+    
+    # TS = fem.FunctionSpace(domain, ("CG", 2, (3, 3)))
+    # piola_expr = fem.Expression(cauchy(u_sol, p_sol), TS.element.interpolation_points())
+    # sig = fem.Function(TS)
+    # sig.interpolate(piola_expr)
+
+    # # += Export
+    # strains = w.sub(0).collapse()
+    # strains.name = "DISP"
+    # stresses = sig
+    # stresses.name = "SIG"
+    # with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + "_strains.bp", strains, engine="BP4") as vtx:
     #     vtx.write(0.0)
     #     vtx.close()
-
-    # # +==+==+
-    # # Variational Problem Setup
-    # # += Test and Trial Parameters
-    # u, p = ufl.split(w)
-    # v, q = ufl.TestFunctions(W)
-    # # += Tensor Indices
-    # i, j, k, a, b, c, d = ufl.indices(7)
-    # # += Curvilinear Mapping
-    # Push = ufl.as_tensor([
-    #     [ufl.cos(ROT), -ufl.sin(ROT), 0],
-    #     [ufl.sin(ROT), ufl.cos(ROT), 0],
-    #     [0, 0, 1]
-    # ])
-    # # += Curvilinear Coordinates
-    # x = fem.Function(V)
-    # x.interpolate(lambda x: x)
-    # x_nu = ufl.inv(Push) * x
-    # u_nu = ufl.inv(Push) * u
-    # nu = ufl.inv(Push) * (x + u_nu)
-    # # += Metric Tensors
-    # Z_un = ufl.grad(x_nu).T * ufl.grad(x_nu)
-    # Z_co = ufl.grad(nu).T * ufl.grad(nu)
-    # Z_ct = ufl.inv(Z_co)
-    # # += Covariant and Contravariant Basis
-    # z_co = ufl.as_tensor((nu.dx(0), nu.dx(1), nu.dx(2)))
-    # # += Christoffel Symbol | Γ^{i}_{j, a}
-    # gamma = ufl.as_tensor((
-    #     0.5 * Z_ct[k, a] * (
-    #         ufl.grad(Z_co)[a, i, j] + ufl.grad(Z_co)[a, j, i] - ufl.grad(Z_co)[i, j, a]
-    #     )
-    # ), [k, i, j])
-    # # += Covariant Derivative
-    # covDev = ufl.grad(v) - ufl.as_tensor(v[k]*gamma[k, i, j], [i, j])
-    # # += Kinematics
-    # I = ufl.variable(ufl.Identity(MESH_DIM))
-    # F = ufl.as_tensor(I[i, j] + ufl.grad(u)[i, j], [i, j]) * Push
-    # C = ufl.variable(ufl.as_tensor(F[k, i]*F[k, j], [i, j]))
-    # E = ufl.variable(ufl.as_tensor((0.5*(Z_co[i,j] - Z_un[i,j])), [i, j]))
-    # J = ufl.variable(ufl.det(F))
-    # aTen = ufl.as_tensor([[0.05, 0, 0],[0, 0, 0],[0, 0, 0]])
-    # # += Constitutive Equations
-    # # += Material Setup | Guccione
-    # Q = (
-    #     GCC_CONS[1] * E[0,0]**2 + 
-    #     GCC_CONS[2] * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
-    #     GCC_CONS[3] * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
-    # )
-    # piola = GCC_CONS[0]/4 * ufl.exp(Q) * ufl.as_matrix([
-    #     [4*GCC_CONS[1]*E[0,0], 2*GCC_CONS[3]*(E[1,0] + E[0,1]), 2*GCC_CONS[3]*(E[2,0] + E[0,2])],
-    #     [2*GCC_CONS[3]*(E[0,1] + E[1,0]), 4*GCC_CONS[2]*E[1,1], 2*GCC_CONS[2]*(E[2,1] + E[1,2])],
-    #     [2*GCC_CONS[3]*(E[0,2] + E[2,0]), 2*GCC_CONS[2]*(E[1,2] + E[2,1]), 4*GCC_CONS[3]*E[2,2]],
-    # ]) - p * Z_un + aTen
-    
-    # # +==+==+
-    # # Problem Solver
-    # # += Residual Equation Integral
-    # metadata = {"quadrature_degree": quad_order}
-    # ds = ufl.Measure('ds', domain=domain, subdomain_data=ft, metadata=metadata)
-    # dx = ufl.Measure("dx", domain=domain, metadata=metadata)
-    # term = ufl.as_tensor(piola[a, b] * F[j, b] * covDev[j, a])
-    # R = term * dx + q * (J - 1) * dx 
-    # # += Nonlinear Solver
-    # problem = NonlinearProblem(R, w, bc)
-    # solver = NewtonSolver(domain.comm, problem)
-    # solver.atol = 1e-8
-    # solver.rtol = 1e-8
-    # solver.convergence_criterion = "incremental"
-
-    # # +==+==+
-    # # Solution and Output
-    # # += Solve
-    # num_its, converged = solver.solve(w)
-    # if converged:
-    #     print(f"Converged in {num_its} iterations.")
-    # else:
-    #     print(f"Not converged after {num_its} iterations.")
-    # u_sol, p_sol = w.split()
-
-    # +==+==+
-    # Interpolate Stress
-    #    (0): Function for calculating cauchy stress
-    def cauchy(u, p):
-        print(u.x.array)
-        i = ufl.Identity(MESH_DIM)
-        f = i + ufl.grad(u)
-        c = f.T * f
-        e = 0.5 * (c - i)
-        j = ufl.det(f)
-        q = (
-            GCC_CONS[1] * e[0,0]**2 + 
-            GCC_CONS[2] * (e[1,1]**2 + e[2,2]**2 + 2*(e[1,2] + e[2,1])) + 
-            GCC_CONS[3] * (2*e[0,1]*e[1,0] + 2*e[0,2]*e[2,0])
-        )
-        s = GCC_CONS[0]/4 * ufl.exp(q) * ufl.as_matrix([
-            [4*GCC_CONS[1]*e[0,0], 2*GCC_CONS[3]*(e[1,0] + e[0,1]), 2*GCC_CONS[3]*(e[2,0] + e[0,2])],
-            [2*GCC_CONS[3]*(e[0,1] + e[1,0]), 4*GCC_CONS[2]*e[1,1], 2*GCC_CONS[2]*(e[2,1] + e[1,2])],
-            [2*GCC_CONS[3]*(e[0,2] + e[2,0]), 2*GCC_CONS[2]*(e[1,2] + e[2,1]), 4*GCC_CONS[3]*e[2,2]],
-        ]) - p * ufl.inv(c)
-        sig = 1/j * f*s*f.T
-        return sig
-    
-    TS = fem.FunctionSpace(domain, ("CG", 2, (3, 3)))
-    piola_expr = fem.Expression(cauchy(u_sol, p_sol), TS.element.interpolation_points())
-    sig = fem.Function(TS)
-    sig.interpolate(piola_expr)
-
-    # += Export
-    strains = w.sub(0).collapse()
-    strains.name = "strains"
-    stresses = sig
-    stresses.name = "stresses"
-    with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + "_strains.bp", strains, engine="BP4") as vtx:
-        vtx.write(0.0)
-        vtx.close()
-    with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + "_stresses.bp", stresses, engine="BP4") as vtx:
-        vtx.write(0.0)
-        vtx.close()
+    # with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + "_stresses.bp", stresses, engine="BP4") as vtx:
+    #     vtx.write(0.0)
+    #     vtx.close()
     
 # +==+==+
 # Main check for script operation.
@@ -469,10 +406,10 @@ def main(test_name, quad_order, test_type):
 if __name__ == '__main__':
     # +==+ Test Parameters
     # += Test name
-    test_name = "TEST_QUICK_BRANCH"
+    test_name = "I_GUCC_COMP_7"
     # += Quadature Degree
     quad_order = 4
     # += Test Type
-    test_type = 1
+    test_type = 0
     # += Feed Main()
     main(test_name, quad_order, test_type)
