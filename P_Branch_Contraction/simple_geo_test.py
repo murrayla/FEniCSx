@@ -17,24 +17,28 @@ import numpy as np
 import math
 import gmsh
 import ufl
-# += Parameters
-MESH_DIM = 3
-ORDER = 2
+
+# +==+==+
+# Parameters
 X, Y, Z = 0, 1, 2
-LAMBDA = -math.ceil(0.08*65000)
-ROT = 0
-Z_DISCS = 14
+# += Geom Parameters
+ORDER = 2
 SARC_N = 7
-FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "z0": 5, "z1": 6, "area": 7}
 SARC_L = 5000
+GEO_DIM = 3
+# += Mesh Parameters
+Z_Ds = 14
+PTs = list(range(100001, 100001+(Z_Ds*20), 5))
+CRs = list(range(10001, 10001+(Z_Ds*20), 5))
+CVs = list(range(20001, 20001+(Z_Ds*20), 5))
+FTs = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "z0": 5, "z1": 6, "area": 7}
 MESH_R = 10000
-PTs = list(range(100001, 100001+(Z_DISCS*20), 5))
-CRs = list(range(10001, 10001+(Z_DISCS*20), 5))
-CVs = list(range(20001, 20001+(Z_DISCS*20), 5))
-SFs = list(range(1001, 1001+(Z_DISCS*20), 5))
-PYs = list(range(101, 101+(Z_DISCS*20), 5))
-VOs = list(range(11, 11+(Z_DISCS*20), 5))
-# Guccione
+# += Test Parameters
+ITS = 10
+LAMBDA = -0.1 * 65000
+ITS_LAM = LAMBDA / ITS
+# += Material Parameters
+ROT = 0
 GCC_CONS = [0.5, 1, 1, 1]
 
 # +==+==+==+
@@ -118,7 +122,7 @@ def create_gmsh_cylinder(test):
                 elif j == 1:
                     right_curves.append(z_loop)
 
-        if i < Z_DISCS-1:
+        if i < Z_Ds-1:
 
             for k in range(0, len(GEOMS[d]["a"]), 1):
                 pt = gmsh.model.occ.addPoint(
@@ -208,7 +212,7 @@ def main(test_name, quad_order, test_type):
         file = "P_Branch_Contraction/gmsh_msh/" + "myo_ideal_refSO" + ".msh"
     elif test_type == 1:
         file = "P_Branch_Contraction/gmsh_msh/" + "myo_branch_refSO" + ".msh"
-    domain, _, ft = io.gmshio.read_from_msh(file, MPI.COMM_WORLD, 0, gdim=MESH_DIM)
+    domain, _, ft = io.gmshio.read_from_msh(file, MPI.COMM_WORLD, 0, gdim=GEO_DIM)
     # ft.name = "Facet markers"
     # domain = mesh.create_unit_cube(comm=MPI.COMM_WORLD, nx=X_ELS, ny=Y_ELS, nz=Z_ELS, cell_type=mesh.CellType.hexahedron)
     Ve = ufl.VectorElement(family="CG", cell=domain.ufl_cell(), degree=2)
@@ -226,7 +230,7 @@ def main(test_name, quad_order, test_type):
 
     # +==+==+
     # Facet assignment
-    fdim = MESH_DIM - 1
+    fdim = GEO_DIM - 1
     # += Locate Facets
     x0_facets = mesh.locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[0], 0))
     x1_facets = mesh.locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[0], 1))
@@ -238,12 +242,12 @@ def main(test_name, quad_order, test_type):
     mfacets = np.hstack([x0_facets, x1_facets, y0_facets, y1_facets, z0_facets, z1_facets])
     # += Assign boundaries IDs in stack
     mvalues = np.hstack([
-        np.full_like(x0_facets, FACET_TAGS["x0"]), 
-        np.full_like(x1_facets, FACET_TAGS["x1"]),
-        np.full_like(y0_facets, FACET_TAGS["y0"]), 
-        np.full_like(y1_facets, FACET_TAGS["y1"]),
-        np.full_like(z0_facets, FACET_TAGS["z0"]), 
-        np.full_like(z1_facets, FACET_TAGS["z1"])
+        np.full_like(x0_facets, FTs["x0"]), 
+        np.full_like(x1_facets, FTs["x1"]),
+        np.full_like(y0_facets, FTs["y0"]), 
+        np.full_like(y1_facets, FTs["y1"]),
+        np.full_like(z0_facets, FTs["z0"]), 
+        np.full_like(z1_facets, FTs["z1"])
     ])
     # += Sort and assign all tags
     sfacets = np.argsort(mfacets)
@@ -255,7 +259,7 @@ def main(test_name, quad_order, test_type):
     v, q = ufl.TestFunctions(W)
     u, p = ufl.split(w)
     i, j, k = ufl.indices(3)
-    I = ufl.variable(ufl.Identity(MESH_DIM))
+    I = ufl.variable(ufl.Identity(GEO_DIM))
     F = ufl.as_tensor(I[i, j] + ufl.grad(u)[i, j], [i, j])
     C = ufl.variable(ufl.as_tensor(F[k, i]*F[k, j], [i, j]))
     E = ufl.variable(ufl.as_tensor((0.5*(C[i,j] - I[i,j])), [i, j]))

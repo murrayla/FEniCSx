@@ -58,8 +58,8 @@ def laplacian_smooth(xy, contour):
 def ellipse_contour(contour):
 
     # += Isolate slice contour
-    curr = np.array(contour)
-    c = np.vstack((curr[0][:, 0, 0], curr[0][:, 0, 1])).T
+    curr = np.array(contour[0])
+    c = np.vstack((curr[:, 0, 0], curr[:, 0, 1])).T
     # += Contour parameters
     xmin, xmax = (np.min(c[:, 0])), (np.max(c[:, 0]))
     ymin, ymax = (np.min(c[:, 1])), (np.max(c[:, 1]))
