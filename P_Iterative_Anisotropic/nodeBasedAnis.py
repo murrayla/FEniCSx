@@ -36,83 +36,13 @@ X_ELS = 5
 Y_ELS = 5
 Z_ELS = 5
 ROT = 0 #np.pi/4
-LAMBDA = 0.1 # 10% extension
+LAMBDA = 0.00 # 10% extension
 MAX_ITS = 5
 FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "z0": 5, "z1": 6, "area": 7}
 GEO_DIM = 3
 BASE_MS = 10
 # Guccione
 GCC_CONS = [0.5, 10, 1, 1]
-
-# +==+==+==+
-# Gmsh Function for constructing idealised geometry
-# +==+==+==+
-def gmshCube(test_name):
-    
-    # +==+==+
-    # Initialise and begin geometry
-    gmsh.initialize()
-    gmsh.model.add(test_name)
-
-    box = gmsh.model.occ.addBox(0, 0, 0, 1, 1, 1, 1)
-    gmsh.model.occ.synchronize()
-    entitites = gmsh.model.occ.get_entities()
-
-    pt_tgs = []
-    cv_tgs = []
-    sf_tgs = []
-    vo_tgs = []
-    side = ["-N_XX", "N_XX", "-N_YY", "N_YY", "-N_ZZ", "N_ZZ"]
-
-    for i, (d, t) in enumerate(entitites):
-        if not(d):
-            pt_tgs.append(t)
-        if d == 1:
-            cv_tgs.append(t)
-        if d == 2:
-            sf_tgs.append(t)
-            gmsh.model.addPhysicalGroup(dim=d, tags=[t], name=side.pop(0))
-            gmsh.model.occ.synchronize()
-        if d == 3:
-            vo_tgs.append(t)
-            gmsh.model.addPhysicalGroup(dim=d, tags=[t], name="Volume")
-
-    gmsh.model.occ.addPoint(0.5, 1, 1, meshSize=BASE_MS, tag=9)
-
-    gmsh.model.mesh.field.add("Distance", 1)
-    gmsh.model.mesh.field.setNumbers(1, "PointsList", [3, 7])
-    gmsh.model.mesh.field.setNumber(1, "Sampling", 1000)
-
-    gmsh.model.mesh.field.add("Threshold", 2)
-    gmsh.model.mesh.field.setNumber(2, "InField", 1)
-    gmsh.model.mesh.field.setNumber(2, "SizeMin", 0.1)
-    gmsh.model.mesh.field.setNumber(2, "SizeMax", 0.5)
-    gmsh.model.mesh.field.setNumber(2, "DistMin", 0.2)
-    gmsh.model.mesh.field.setNumber(2, "DistMax", 0.3)
-
-    gmsh.model.mesh.field.add("Min", 7)
-    gmsh.model.mesh.field.setNumbers(7, "FieldsList", [2])
-
-    gmsh.model.mesh.field.setAsBackgroundMesh(7)
-
-    # def meshSizeCallback(dim, tag, x, y, z, lc):
-    #     return min(lc, 0.02 * x + 0.01)
-
-    # gmsh.model.mesh.setSizeCallback(meshSizeCallback)
-
-    gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
-    gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
-    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
-
-    gmsh.model.occ.synchronize()
-    gmsh.option.setNumber("Mesh.Algorithm", 5)
-
-    # += Create Mesh
-    gmsh.model.mesh.generate(3)
-    # gmsh.model.mesh.setOrder(2)
-    # += Write File
-    gmsh.write("P_Branch_Contraction/gmsh_msh/" + test_name + ".msh")
-    gmsh.finalize()
 
 # +==+==+==+
 # main()
@@ -124,7 +54,6 @@ def gmshCube(test_name):
 def main(test_name, elem_order, quad_order):
     # +==+==+
     # Setup problem space
-    gmshCube(test_name)
     file = "P_Branch_Contraction/gmsh_msh/" + test_name + ".msh"
     domain, _, ft = io.gmshio.read_from_msh(file, MPI.COMM_WORLD, 0, gdim=GEO_DIM)
     Ve = ufl.VectorElement(family="CG", cell=domain.ufl_cell(), degree=elem_order)
@@ -316,7 +245,7 @@ def main(test_name, elem_order, quad_order):
 if __name__ == '__main__':
     # +==+ Test Parameters
     # += Test name
-    test_name = "SimpleCube"
+    test_name = "CUBE_YY_BRANCH_MIDDLE"
     # += Element order
     elem_order = 2
     # += Quadature Degree
