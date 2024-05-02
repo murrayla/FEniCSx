@@ -36,7 +36,7 @@ X_ELS = 5
 Y_ELS = 5
 Z_ELS = 5
 ROT = 0 #np.pi/4
-LAMBDA = 0.00 # 10% extension
+LAMBDA = 0.02 # 10% extension
 MAX_ITS = 5
 FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "z0": 5, "z1": 6, "area": 7}
 GEO_DIM = 3
@@ -179,6 +179,7 @@ def main(test_name, elem_order, quad_order):
     con = np.linspace(LAMBDA-LAMBDA/MAX_ITS, -LAMBDA, MAX_ITS*2)
     ret = np.linspace(-LAMBDA, 0, MAX_ITS)
     lam = np.concatenate([ext, con, ret])
+    lam = [0]
 
     Vu_sol, up_to_u_sol = W.sub(0).collapse() 
     u_sol = Function(Vu_sol) 
@@ -190,52 +191,52 @@ def main(test_name, elem_order, quad_order):
     p_sol.name = "pressure"
     
     eps_file = io.VTXWriter(MPI.COMM_WORLD, "Iterative_Anisotropic/paraview_bp/" + test_name + "_eps.bp", u_sol, engine="BP4")
-    for i, d in enumerate(lam):
-        # +==+==+ 
-        # Boundary Conditions
-        # +==+ [x0]
-        x0_dofs_x = locate_dofs_topological((W.sub(0).sub(X), Vx), ft.dim, x0_facets)
-        u0_bc_x = Function(Vx)
-        u0_bc_x.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
-        bc_x0_x = dirichletbc(u0_bc_x, x0_dofs_x, W.sub(0).sub(X))
-        # +==+ [x1]
-        x1_dofs_x = locate_dofs_topological((W.sub(0).sub(X), Vx), ft.dim, x1_facets)
-        u1_bc_x = Function(Vx)
-        u1_bc_x.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(d)))
-        bc_x1_x = dirichletbc(u1_bc_x, x1_dofs_x, W.sub(0).sub(X))
-        # +==+ [y0]
-        y0_dofs_y = locate_dofs_topological((W.sub(0).sub(Y), Vy), ft.dim, y0_facets)
-        u0_bc_y = Function(Vy)
-        u0_bc_y.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
-        bc_y0_y = dirichletbc(u0_bc_y, y0_dofs_y, W.sub(0).sub(Y))
-        # +==+ [z0]
-        z0_dofs_z = locate_dofs_topological((W.sub(0).sub(Z), Vz), ft.dim, z0_facets)
-        u0_bc_z = Function(Vz)
-        u0_bc_z.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
-        bc_z0_z = dirichletbc(u0_bc_z, z0_dofs_z, W.sub(0).sub(Z))
-        # +==+ BC Concatenate
-        bc = [bc_x0_x, bc_x1_x, bc_y0_y, bc_z0_z]
     
-        # += Nonlinear Solver
-        problem = NonlinearProblem(R, w, bc)
-        solver = NewtonSolver(domain.comm, problem)
-        solver.atol = 1e-8
-        solver.rtol = 1e-8
-        solver.convergence_criterion = "incremental"
+    # +==+==+ 
+    # Boundary Conditions
+    # +==+ [x0]
+    x0_dofs_x = locate_dofs_topological((W.sub(0).sub(X), Vx), ft.dim, x0_facets)
+    u0_bc_x = Function(Vx)
+    u0_bc_x.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
+    bc_x0_x = dirichletbc(u0_bc_x, x0_dofs_x, W.sub(0).sub(X))
+    # +==+ [x1]
+    x1_dofs_x = locate_dofs_topological((W.sub(0).sub(X), Vx), ft.dim, x1_facets)
+    u1_bc_x = Function(Vx)
+    u1_bc_x.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.05)))
+    bc_x1_x = dirichletbc(u1_bc_x, x1_dofs_x, W.sub(0).sub(X))
+    # +==+ [y0]
+    y0_dofs_y = locate_dofs_topological((W.sub(0).sub(Y), Vy), ft.dim, y0_facets)
+    u0_bc_y = Function(Vy)
+    u0_bc_y.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
+    bc_y0_y = dirichletbc(u0_bc_y, y0_dofs_y, W.sub(0).sub(Y))
+    # +==+ [z0]
+    z0_dofs_z = locate_dofs_topological((W.sub(0).sub(Z), Vz), ft.dim, z0_facets)
+    u0_bc_z = Function(Vz)
+    u0_bc_z.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
+    bc_z0_z = dirichletbc(u0_bc_z, z0_dofs_z, W.sub(0).sub(Z))
+    # +==+ BC Concatenate
+    bc = [bc_x0_x, bc_x1_x, bc_y0_y, bc_z0_z]
+    
+    # += Nonlinear Solver
+    problem = NonlinearProblem(R, w, bc)
+    solver = NewtonSolver(domain.comm, problem)
+    solver.atol = 1e-8
+    solver.rtol = 1e-8
+    solver.convergence_criterion = "incremental"
 
-        # +==+==+
-        # Solution and Output
-        # += Solve
-        num_its, converged = solver.solve(w)
-        if converged:
-            print(f"Converged in {num_its} iterations.")
-        else:
-            print(f"Not converged after {num_its} iterations.")
+    # +==+==+
+    # Solution and Output
+    # += Solve
+    num_its, converged = solver.solve(w)
+    if converged:
+        print(f"Converged in {num_its} iterations.")
+    else:
+        print(f"Not converged after {num_its} iterations.")
 
-        u_eval = w.sub(0).collapse()
-        u_sol.interpolate(u_eval)
+    u_eval = w.sub(0).collapse()
+    u_sol.interpolate(u_eval)
 
-        eps_file.write(i)
+    eps_file.write(0)
 
     eps_file.close()
     
@@ -245,7 +246,7 @@ def main(test_name, elem_order, quad_order):
 if __name__ == '__main__':
     # +==+ Test Parameters
     # += Test name
-    test_name = "CUBE_YY_BRANCH_MIDDLE"
+    test_name = "CUBE"
     # += Element order
     elem_order = 2
     # += Quadature Degree

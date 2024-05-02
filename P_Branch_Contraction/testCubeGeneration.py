@@ -13,7 +13,7 @@ import numpy as np
 # += Constants
 DIM = 3
 RAW = 1
-REF = 0.01
+REF = 0.1
 ORDER = 2
 DIST_TAG = 1
 THRE_TAG = 2
@@ -58,46 +58,60 @@ def gmsh_cube(test_name, data):
             vo_tgs.append(t)
             gmsh.model.addPhysicalGroup(dim=d, tags=[t], name="Volume")
 
-    gmsh.model.occ.addPoint(0.5, 1, 0.5, tag=9)
-    gmsh.model.occ.addPoint(0.5, 0.5, 0.5, tag=10)
-    gmsh.model.occ.addLine(9, 10, 100)
+    # gmsh.model.occ.addPoint(0.5, 1, 0.5, tag=9)
+    # gmsh.model.occ.addPoint(0.5, 0.5, 0.5, tag=10)
+    # gmsh.model.occ.addLine(9, 10, 100)
 
-    gmsh.model.occ.addPoint(0.25, 0, 0.5, tag=11)
-    gmsh.model.occ.addLine(10, 11, 101)
+    # gmsh.model.occ.addPoint(0.25, 0, 0.5, tag=11)
+    # gmsh.model.occ.addLine(10, 11, 101)
 
-    gmsh.model.occ.addPoint(0.75, 0, 0.5, tag=12)
-    gmsh.model.occ.addLine(10, 12, 102)
-    gmsh.model.occ.synchronize()
+    # gmsh.model.occ.addPoint(0.75, 0, 0.5, tag=12)
+    # gmsh.model.occ.addLine(10, 12, 102)
+    # gmsh.model.occ.synchronize()
 
     # +==+==+
     # Create Mesh fields
     # += Crete distance field to begin mesh generation
-    gmsh.model.mesh.field.add("Distance", DIST_TAG)
-    gmsh.model.mesh.field.setNumbers(DIST_TAG, "PointsList", [9, 10, 11, 12])
-    gmsh.model.mesh.field.setNumbers(DIST_TAG, "CurvesList", [100, 101, 102])
-    gmsh.model.mesh.field.setNumber(1, "Sampling", 100)
-    # += Create threshold field
-    gmsh.model.mesh.field.add("Threshold", THRE_TAG)
-    gmsh.model.mesh.field.setNumber(THRE_TAG, "InField", DIST_TAG)
-    gmsh.model.mesh.field.setNumber(THRE_TAG, "SizeMin", REF)
-    gmsh.model.mesh.field.setNumber(THRE_TAG, "SizeMax", RAW)
-    gmsh.model.mesh.field.setNumber(THRE_TAG, "DistMin", 0.1)
-    gmsh.model.mesh.field.setNumber(THRE_TAG, "DistMax", 0.6)
-    # += Create minimum field
-    gmsh.model.mesh.field.add("Min", MINF_TAG)
-    gmsh.model.mesh.field.setNumbers(MINF_TAG, "FieldsList", [THRE_TAG])
-    # += Set min field as background mesh
-    gmsh.model.mesh.field.setAsBackgroundMesh(MINF_TAG)
-    # += Set and Stabalise meshing
-    # def meshSizeCallback(dim, tag, x, y, z, lc):
-    #     return max(lc, 0.02 * x + 0.01)
-    # gmsh.model.mesh.setSizeCallback(meshSizeCallback)
-    gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
-    gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
-    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
-    # += set "Delaunay" algorithm for meshing due to complex gradients
-    gmsh.model.occ.synchronize()
-    gmsh.option.setNumber("Mesh.Algorithm", value=DELAUNAY)
+    # gmsh.model.mesh.field.add("Distance", DIST_TAG)
+    # gmsh.model.mesh.field.setNumbers(DIST_TAG, "PointsList", [9, 10, 11, 12])
+    # gmsh.model.mesh.field.setNumbers(DIST_TAG, "CurvesList", [100, 101, 102])
+    # gmsh.model.mesh.field.setNumber(1, "Sampling", 100)
+
+    # gmsh.model.occ.addPoint(0, 0.5, 0.5, tag=9)
+    # gmsh.model.occ.addPoint(1, 0.5, 0.5, tag=10)
+    # gmsh.model.occ.addLine(9, 10, 100)
+
+    # # +==+==+
+    # # Create Mesh fields
+    # # += Crete distance field to begin mesh generation
+    # gmsh.model.mesh.field.add("Distance", DIST_TAG)
+    # # gmsh.model.mesh.field.setNumbers(DIST_TAG, "PointsList", [9, 10])
+    # gmsh.model.mesh.field.setNumbers(DIST_TAG, "CurvesList", [100])
+    # gmsh.model.mesh.field.setNumber(1, "Sampling", 100)
+
+    # # += Create threshold field
+    # gmsh.model.mesh.field.add("Threshold", THRE_TAG)
+    # # gmsh.model.mesh.field.setNumber(THRE_TAG, "Sigmoid", True)
+    # gmsh.model.mesh.field.setNumber(THRE_TAG, "InField", DIST_TAG)
+    # gmsh.model.mesh.field.setNumber(THRE_TAG, "SizeMin", 0.01)
+    # gmsh.model.mesh.field.setNumber(THRE_TAG, "SizeMax", 1)
+    # gmsh.model.mesh.field.setNumber(THRE_TAG, "DistMin", 0.05)
+    # gmsh.model.mesh.field.setNumber(THRE_TAG, "DistMax", 1)
+    # # += Create minimum field
+    # gmsh.model.mesh.field.add("Min", MINF_TAG)
+    # gmsh.model.mesh.field.setNumbers(MINF_TAG, "FieldsList", [THRE_TAG])
+    # # += Set min field as background mesh
+    # gmsh.model.mesh.field.setAsBackgroundMesh(MINF_TAG)
+    # # += Set and Stabalise meshing
+    # # def meshSizeCallback(dim, tag, x, y, z, lc):
+    # #     return max(lc, 0.02 * x + 0.01)
+    # # gmsh.model.mesh.setSizeCallback(meshSizeCallback)
+    # gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
+    # gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
+    # gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
+    # # += set "Delaunay" algorithm for meshing due to complex gradients
+    # gmsh.model.occ.synchronize()
+    # gmsh.option.setNumber("Mesh.Algorithm", value=DELAUNAY)
 
     # += Generate Mesh
     gmsh.model.mesh.generate(dim=DIM)
@@ -118,6 +132,6 @@ if __name__ == '__main__':
     # +==+==+
     # Test Parameters
     # += Test name
-    test_name = "CUBE_YY_BRANCH_MIDDLE"
+    test_name = "CUBE"
     # += Feed Main()
     main(test_name)
