@@ -190,7 +190,7 @@ def main(test_name, elem_order, quad_order):
     u_sol.name = "disp"
     p_sol.name = "pressure"
     
-    eps_file = io.VTXWriter(MPI.COMM_WORLD, "Iterative_Anisotropic/paraview_bp/" + test_name + "_eps.bp", u_sol, engine="BP4")
+    eps_file = io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + "_eps.bp", u_sol, engine="BP4")
     
     # +==+==+ 
     # Boundary Conditions
@@ -246,7 +246,7 @@ def main(test_name, elem_order, quad_order):
 if __name__ == '__main__':
     # +==+ Test Parameters
     # += Test name
-    test_name = "CUBE"
+    test_name = "QUAD_XX_SINGLE_MIDDLE"
     # += Element order
     elem_order = 2
     # += Quadature Degree
