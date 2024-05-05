@@ -26,6 +26,8 @@ CYTOSOL = 1
 MYO_STRAIGHT = 2
 MYO_UPANGLED = 3
 MYO_DNANGLED = 4
+LEFT_SIDE = 5
+RIGHT_SIDE = 6
 
 # +==+==+==+
 # CSV Network Loading:
@@ -164,37 +166,61 @@ def gmsh_cube(test_name, test_case):
                 if cenn[j][1] == cenn[j+l][1]:
                     av = np.mean(centroids, axis=0)
                     even_cents.append(av)
-                    even_cents.append(cenn[j] + [0.01, 0, 0])
-                    even_cents.append(cenn[j+l] - [0.01, 0, 0])
                 if cenn[j][1] > cenn[j+l][1]:
                     av = np.mean(centroids, axis=0)
                     lower_cents.append(av)
-                    lower_cents.append(cenn[j] + [0.01, 0, 0])
-                    lower_cents.append(cenn[j+l] - [0.01, 0, 0])
                 if cenn[j][1] < cenn[j+l][1]:
                     av = np.mean(centroids, axis=0)
                     upper_cents.append(av)
-                    upper_cents.append(cenn[j] + [0.01, 0, 0])
-                    upper_cents.append(cenn[j+l] - [0.01, 0, 0])
     gmsh.model.occ.synchronize()
 
-    # # += Mark Physical groups
-    # even, upper, lower, remain = [], [], [], []
-    # for surface in gmsh.model.getEntities(dim=2):
-    #     com = gmsh.model.occ.getCenterOfMass(surface[0], surface[1])
-    #     if np.allclose(com, [0.5, 0.25, 0]):
-    #         bottom = surface[1]
-    #     else:
-    #         top = surface[1]
-    # gmsh.model.addPhysicalGroup(2, [bottom], bottom_marker)
-    # gmsh.model.addPhysicalGroup(2, [top], top_marker)
-    # # Tag the left boundary
-    # left = []
-    # for line in gmsh.model.getEntities(dim=1):
-    #     com = gmsh.model.occ.getCenterOfMass(line[0], line[1])
-    #     if np.isclose(com[0], 0):
-    #         left.append(line[1])
-    # gmsh.model.addPhysicalGroup(1, left, left_marker)
+    # += Mark Physical groups
+    even, upper, lower, remain = [], [], [], []
+    for surface in gmsh.model.getEntities(dim=2):
+        com = gmsh.model.occ.getCenterOfMass(surface[0], surface[1])
+        ev_check = [np.allclose(com, x) for x in even_cents]
+        lw_check = [np.allclose(com, x) for x in lower_cents]
+        up_check = [np.allclose(com, x) for x in upper_cents]
+        # += MANUALLY SUPPLY LABELS
+        print("     += DECLARE SUFRACE FOR {} @ COM: {}".format(test_name, com))
+        dec = int(input(" ~+ Enter: "))
+        # if np.any(ev_check):
+        #     even.append(surface[1])
+        #     continue
+        # if np.any(lw_check):
+        #     lower.append(surface[1])
+        #     continue
+        # if np.any(up_check):
+        #     upper.append(surface[1])
+        #     continue
+        # else:
+        #     remain.append(surface[1])
+        if dec == 0:
+            even.append(surface[1])
+            continue
+        if dec == 1:
+            lower.append(surface[1])
+            continue
+        if dec == 2:
+            upper.append(surface[1])
+            continue
+        else:
+            remain.append(surface[1])
+    gmsh.model.addPhysicalGroup(2, even, MYO_STRAIGHT, "Straight Sarcomere")
+    gmsh.model.addPhysicalGroup(2, lower, MYO_DNANGLED, "Sarcomere Angled Down")
+    gmsh.model.addPhysicalGroup(2, upper, MYO_UPANGLED, "Sarcomere Angled Up")
+    gmsh.model.addPhysicalGroup(2, remain, CYTOSOL, "Cytosol")
+    # += Mark right and left
+    left, right = [], []
+    for line in gmsh.model.getEntities(dim=1):
+        com = gmsh.model.occ.getCenterOfMass(line[0], line[1])
+        if np.isclose(com[0], 0):
+            left.append(line[1])
+            continue
+        if np.isclose(com[0], 1):
+            right.append(line[1])
+    gmsh.model.addPhysicalGroup(1, left, LEFT_SIDE, "X0")
+    gmsh.model.addPhysicalGroup(1, right, RIGHT_SIDE, "X1")
 
     # +==+==+
     # Create Mesh fields
