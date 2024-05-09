@@ -9,43 +9,26 @@
 # +==+==+==+
 # Setup
 # += Imports
-from dolfinx import mesh, io, la, default_scalar_type
-from dolfinx.fem import (
-    Function, FunctionSpace, dirichletbc, form,
-    locate_dofs_geometrical, locate_dofs_topological, 
-    Expression
-)
-from dolfinx.fem.petsc import (
-    NonlinearProblem, LinearProblem, apply_lifting, 
-    assemble_matrix, assemble_vector, create_matrix, 
-    create_vector, set_bc
-)
-from dolfinx.mesh import (create_unit_square, create_unit_cube, CellType, locate_entities_boundary, locate_entities, meshtags)
+from dolfinx import io,  default_scalar_type
+from dolfinx.fem import Function, FunctionSpace, dirichletbc, locate_dofs_topological, Expression
+from dolfinx.fem.petsc import NonlinearProblem
+from dolfinx.mesh import locate_entities_boundary, meshtags
 from dolfinx.nls.petsc import NewtonSolver
-from petsc4py import PETSc
 from mpi4py import MPI
 import numpy as np
 import ufl
 # += Parameters
-MESH_DIM = 2
+ROT = np.arctan(0.3/1)
+NULL = 0.0
+UNIT = 1.0
 X, Y = 0, 1
-X_ELS = 5
-Y_ELS = 5
-ROT = 0 #np.pi/4
-LAMBDA = 0.03 # 10% extension
-MAX_ITS = 5
-FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "area": 7}
-GEO_DIM = 2
-BASE_MS = 10
-# Guccione
-GCC_CONS = [0.5, 5, 1, 1]
-# += Group IDs
-CYTOSOL = 1
-MYO_STRAIGHT = 2
-MYO_UPANGLED = 3
-MYO_DNANGLED = 4
-LEFT_SIDE = 5
-RIGHT_SIDE = 6
+GEOM_DIM = 2
+MESH_DIM = 2
+TOLERANCE = 1e-5
+DISPLACEMENT = 0.03
+MATERIAL_CONSTANTS = [0.5, 5, 1, 1]
+FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "area": 5}
+GROUP_IDS = {"Cytosol": 1, "Straight": 2, "Incline": 3, "Decline": 4, "x0": 5, "x1": 6}
 
 # +==+==+==+
 # main()
@@ -55,118 +38,107 @@ RIGHT_SIDE = 6
 #   Outputs:
 #       (0): .bp folder of contracted unit square
 def main(test_name, elem_order, quad_order, ID):
-    # +==+==+
-    # Setup problem space
+    # +==+ Domain Setup
+    # += Load mesh data
     file = "P_Branch_Contraction/gmsh_msh/" + test_name + ".msh"
-    domain, ct, ft = io.gmshio.read_from_msh(file, MPI.COMM_WORLD, 0, gdim=GEO_DIM)
+    domain, ct, _ = io.gmshio.read_from_msh(filename=file, comm=MPI.COMM_WORLD, rank=0, gdim=GEOM_DIM)
+    # += Create mixed element spaces
     Ve = ufl.VectorElement(family="CG", cell=domain.ufl_cell(), degree=elem_order)
     Vp = ufl.FiniteElement(family="CG", cell=domain.ufl_cell(), degree=elem_order-1)  
-    W = FunctionSpace(domain, ufl.MixedElement([Ve, Vp]))
+    W = FunctionSpace(mesh=domain, element=ufl.MixedElement([Ve, Vp]))
     w = Function(W)
-
-    # +==+==+ 
-    # Extract subdomains for dofs
+    # +== Extract subdomains for dofs
     V, _ = W.sub(0).collapse()
     Vx, dofsX = V.sub(X).collapse()
     Vy, dofsY = V.sub(Y).collapse()
 
-    # +==+==+
-    # Facet assignment
-    fdim = MESH_DIM - 1
-    # += Locate Facets
-    x0_facets = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[0], 0))
-    x1_facets = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[0], 1))
-    y0_facets = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[1], 0))
-    y1_facets = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[1], 1))
-    # += Collate facets into stack
-    mfacets = np.hstack([x0_facets, x1_facets, y0_facets, y1_facets])
-    # += Assign boundaries IDs in stack
-    mvalues = np.hstack([
-        np.full_like(x0_facets, FACET_TAGS["x0"]), 
-        np.full_like(x1_facets, FACET_TAGS["x1"]),
-        np.full_like(y0_facets, FACET_TAGS["y0"]), 
-        np.full_like(y1_facets, FACET_TAGS["y1"]),
-    ])
-    # += Sort and assign all tags
-    sfacets = np.argsort(mfacets)
-    ft = meshtags(mesh=domain, dim=fdim, entities=mfacets[sfacets], values=mvalues[sfacets])
-
-    # +==+==+
-    # BC: Base [x0]
-    # += Locate subdomain dofs
-    x0_dofs_x = locate_dofs_topological((W.sub(0).sub(X), Vx), ft.dim, x0_facets)
-    x0_dofs_y = locate_dofs_topological((W.sub(0).sub(Y), Vy), ft.dim, x0_facets)
-    # += Interpolate 
-    u0_bc_x = Function(Vx)
-    u0_bc_x.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(LAMBDA)))
-    u0_bc_y = Function(Vy)
-    u0_bc_y.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
-    # += Create Dirichlet over subdomains
-    bc_z0_x = dirichletbc(u0_bc_x, x0_dofs_x, W.sub(0).sub(X))
-    bc_z0_y = dirichletbc(u0_bc_y, x0_dofs_y, W.sub(0).sub(Y))
-
-    # +==+==+
-    # BC: Base [x1]
-    # += Locate subdomain dofs
-    x1_dofs_x = locate_dofs_topological((W.sub(0).sub(X), Vx), ft.dim, x1_facets)
-    x1_dofs_y = locate_dofs_topological((W.sub(0).sub(Y), Vy), ft.dim, x1_facets)
-    # += Interpolate 
-    u1_bc_x = Function(Vx)
-    u1_bc_x.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-LAMBDA)))
-    u1_bc_y = Function(Vy)
-    u1_bc_y.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(0.0)))
-    # += Create Dirichlet over subdomains
-    bc_z1_x = dirichletbc(u1_bc_x, x1_dofs_x, W.sub(0).sub(X))
-    bc_z1_y = dirichletbc(u1_bc_y, x1_dofs_y, W.sub(0).sub(Y))
-
-    # +==+ BC Concatenate
-    bc = [bc_z0_x, bc_z0_y, bc_z1_x, bc_z1_y]
+    # +==+ Boundary Condition Setup
+    def boundary_conditions(domain, W, Vx, Vy):
+        # += Facet assignment
+        fdim = MESH_DIM - 1
+        x0_ft = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[0], 0))
+        x1_ft = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[0], 1))
+        y0_ft = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[1], 0))
+        y1_ft = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[1], 1))
+        mfacets = np.hstack([x0_ft, x1_ft, y0_ft, y1_ft])
+        # += Assign boundaries IDs and sort
+        mvalues = np.hstack([
+            np.full_like(x0_ft, FACET_TAGS["x0"]), 
+            np.full_like(x1_ft, FACET_TAGS["x1"]),
+            np.full_like(y0_ft, FACET_TAGS["y0"]), 
+            np.full_like(y1_ft, FACET_TAGS["y1"]),
+        ])
+        sfacets = np.argsort(mfacets)
+        ft = meshtags(mesh=domain, dim=fdim, entities=mfacets[sfacets], values=mvalues[sfacets])
+        # += Locate subdomain dofs
+        x_dofs_at_x0 = locate_dofs_topological(V=(W.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=x0_ft)
+        y_dofs_at_x0 = locate_dofs_topological(V=(W.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=x0_ft)
+        x_dofs_at_x1 = locate_dofs_topological(V=(W.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=x1_ft)
+        y_dofs_at_x1 = locate_dofs_topological(V=(W.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=x1_ft)
+        # += Interpolate 
+        ux_at_x0, uy_at_x0, ux_at_x1, uy_at_x1 = Function(Vx), Function(Vy), Function(Vx), Function(Vy)
+        ux_at_x0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(DISPLACEMENT)))
+        uy_at_x0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(NULL)))
+        ux_at_x1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-DISPLACEMENT)))
+        uy_at_x1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(NULL)))
+        # += Create Dirichlet over subdomains
+        bc_UxX0 = dirichletbc(value=ux_at_x0, dofs=x_dofs_at_x0, V=W.sub(0).sub(X))
+        bc_UyX0 = dirichletbc(value=uy_at_x0, dofs=y_dofs_at_x0, V=W.sub(0).sub(Y))
+        bc_UxX1 = dirichletbc(value=ux_at_x1, dofs=x_dofs_at_x1, V=W.sub(0).sub(X))
+        bc_UyX1 = dirichletbc(value=uy_at_x1, dofs=y_dofs_at_x1, V=W.sub(0).sub(Y))
+        # += Assign
+        return [bc_UxX0, bc_UyX0, bc_UxX1, bc_UyX1], ft
     
-    # += Identify the subdomains of interest  
-    str_myo = ct.find(MYO_STRAIGHT)
-    upa_myo = ct.find(MYO_UPANGLED)
-    dwa_myo = ct.find(MYO_DNANGLED)
-    cytosol = ct.find(CYTOSOL)
+    # += Extract boundary conditions and facet tags
+    bc, ft = boundary_conditions(domain, W, Vx, Vy)
+    
+    # +==+ Subdomain Setup
+    def subdomain_assignments(domain, ct):
+        # += Locate cells of interest
+        str_myo = ct.find(GROUP_IDS["Straight"])
+        inc_myo = ct.find(GROUP_IDS["Incline"])
+        dec_myo = ct.find(GROUP_IDS["Decline"])
+        cytosol = ct.find(GROUP_IDS["Cytosol"])
+        # += Create 1-DOF space for assignment
+        V_1DG = FunctionSpace(domain, ("DG", 0))
+        fibre_rot, fibre_val = Function(V_1DG), Function(V_1DG)
+        # += Conditionally assign rotation and material value
+        if len(str_myo):
+            fibre_rot.x.array[str_myo] = np.full_like(str_myo, NULL, dtype=default_scalar_type)
+            fibre_val.x.array[str_myo] = np.full_like(str_myo, MATERIAL_CONSTANTS[1], dtype=default_scalar_type)
+        if len(inc_myo):
+            fibre_rot.x.array[inc_myo] = np.full_like(inc_myo, ROT, dtype=default_scalar_type)
+            fibre_val.x.array[inc_myo] = np.full_like(inc_myo, MATERIAL_CONSTANTS[1], dtype=default_scalar_type)
+        if len(dec_myo):
+            fibre_rot.x.array[dec_myo] = np.full_like(dec_myo, -ROT, dtype=default_scalar_type)
+            fibre_val.x.array[dec_myo] = np.full_like(dec_myo, MATERIAL_CONSTANTS[1], dtype=default_scalar_type)
+        if len(cytosol):
+            fibre_rot.x.array[cytosol] = np.full_like(cytosol, NULL, dtype=default_scalar_type)
+            fibre_val.x.array[cytosol] = np.full_like(cytosol, UNIT, dtype=default_scalar_type)
+        return fibre_rot, fibre_val
+    
+    # += Define rotation and material value
+    fibre_rot, fibre_val = subdomain_assignments(domain, ct)
 
-    # +==+==+
-    # Variational Problem Setup
+    # +==+ Variational Problem Setup
     # += Test and Trial Parameters
     u, p = ufl.split(w)
     v, q = ufl.TestFunctions(W)
-    
-    # += Curvilinear Coordinates
+    # += Coordinate values
     x = Function(V)
     x.interpolate(lambda x: (x[0], x[1]))
-
-    Q = FunctionSpace(domain, ("DG", 0))
-    r = Function(Q)
-    gc1 = Function(Q)
-
-    if len(str_myo):
-        r.x.array[str_myo] = np.full_like(str_myo, 0.0, dtype=default_scalar_type)
-        gc1.x.array[str_myo] = np.full_like(str_myo, GCC_CONS[1], dtype=default_scalar_type)
-    if len(upa_myo):
-        r.x.array[upa_myo] = np.full_like(upa_myo, 0.29, dtype=default_scalar_type)
-        gc1.x.array[upa_myo] = np.full_like(upa_myo, GCC_CONS[1], dtype=default_scalar_type)
-    if len(dwa_myo):
-        r.x.array[dwa_myo] = np.full_like(dwa_myo, -0.29, dtype=default_scalar_type)
-        gc1.x.array[dwa_myo] = np.full_like(dwa_myo, GCC_CONS[1], dtype=default_scalar_type)
-    if len(cytosol):
-        r.x.array[cytosol] = np.full_like(cytosol, 0.0, dtype=default_scalar_type)
-        gc1.x.array[cytosol] = np.full_like(cytosol, 1.0, dtype=default_scalar_type)
-
     # += Tensor Indices
     i, j, k, a, b = ufl.indices(5)
-    # += Curvilinear Mapping
-    
+    # += Curvilinear mapping dependent on subdomain values
     Push = ufl.as_matrix([
-        [ufl.cos(r), -ufl.sin(r)],
-        [ufl.sin(r), ufl.cos(r)]
+        [ufl.cos(fibre_rot), -ufl.sin(fibre_rot)],
+        [ufl.sin(fibre_rot), ufl.cos(fibre_rot)]
     ])
+    # += Subdomain dependent rotations of displacement and coordinates
     x_nu = ufl.inv(Push) * x
     u_nu = ufl.inv(Push) * u
     nu = ufl.inv(Push) * (x + u_nu)
-    # += Metric Tensors
+    # += Metric tensors
     Z_un = ufl.grad(x_nu).T * ufl.grad(x_nu)
     Z_co = ufl.grad(nu).T * ufl.grad(nu)
     Z_ct = ufl.inv(Z_co)
@@ -178,7 +150,7 @@ def main(test_name, elem_order, quad_order, ID):
     ), [k, i, j])
     # += Covariant Derivative
     covDev = ufl.grad(v) - ufl.as_tensor(v[k]*gamma[k, i, j], [i, j])
-    # += Kinematics
+    # += Kinematics variables
     I = ufl.variable(ufl.Identity(MESH_DIM))
     F = ufl.as_tensor(I[i, j] + ufl.grad(u)[i, j], [i, j]) * Push
     C = ufl.variable(ufl.as_tensor(F[k, i]*F[k, j], [i, j]))
@@ -186,43 +158,28 @@ def main(test_name, elem_order, quad_order, ID):
     J = ufl.variable(ufl.det(F))
     # += Material Setup | Guccione
     Q = (
-        gc1 * E[0,0]**2 + 
-        GCC_CONS[2] * (E[1,1]**2) + 
-        GCC_CONS[3] * (2*E[0,1]*E[1,0])
+        fibre_val * E[0,0]**2 + 
+        MATERIAL_CONSTANTS[2] * (E[1,1]**2) + 
+        MATERIAL_CONSTANTS[3] * (2*E[0,1]*E[1,0])
     )
-    piola = GCC_CONS[0]/4 * ufl.exp(Q) * ufl.as_matrix([
-        [4*gc1*E[0,0], 2*GCC_CONS[3]*(E[1,0] + E[0,1])],
-        [2*GCC_CONS[3]*(E[0,1] + E[1,0]), 4*GCC_CONS[2]*E[1,1]],
+    piola = MATERIAL_CONSTANTS[0]/4 * ufl.exp(Q) * ufl.as_matrix([
+        [4*fibre_val*E[0,0], 2*MATERIAL_CONSTANTS[3]*(E[1,0] + E[0,1])],
+        [2*MATERIAL_CONSTANTS[3]*(E[0,1] + E[1,0]), 4*MATERIAL_CONSTANTS[2]*E[1,1]],
     ]) - p * Z_un
     term = ufl.as_tensor(piola[a, b] * F[j, b] * covDev[j, a])
     
-    # +==+==+
-    # Problem Solver
-    # += Residual Equation Integral
+    # +==+ Solver Setup
+    # += Measure assignment
     metadata = {"quadrature_degree": quad_order}
-    ds = ufl.Measure('ds', domain=domain, subdomain_data=ft, metadata=metadata)
-    dx = ufl.Measure("dx", domain=domain, metadata=metadata)
-
+    dx = ufl.Measure(integral_type="dx", domain=domain, metadata=metadata)
+    # += Residual equation
     R = term * dx + q * (J - 1) * dx
-
-    Vu_sol, up_to_u_sol = W.sub(0).collapse() 
-    u_sol = Function(Vu_sol) 
-
-    Vp_sol, up_to_p_sol = W.sub(1).collapse() 
-    p_sol = Function(Vp_sol) 
-
-    u_sol.name = "disp"
-    p_sol.name = "pressure"
-    
-    # += Nonlinear Solver
-    problem = NonlinearProblem(R, w, bc)
-    solver = NewtonSolver(domain.comm, problem)
-    solver.atol = 1e-5
-    solver.rtol = 1e-5
+    # += Nonlinear solver
+    problem = NonlinearProblem(F=R, u=w, bcs=bc)
+    solver = NewtonSolver(comm=domain.comm, problem=problem)
+    solver.atol = TOLERANCE
+    solver.rtol = TOLERANCE
     solver.convergence_criterion = "incremental"
-
-    # +==+==+
-    # Solution and Output
     # += Solve
     num_its, converged = solver.solve(w)
     if converged:
@@ -230,45 +187,58 @@ def main(test_name, elem_order, quad_order, ID):
     else:
         print(f"Not converged after {num_its} iterations.")
 
-    # # +==+==+
-    # # Interpolate Stress
-    # def cauchy(u, p):
-    #     i = ufl.Identity(MESH_DIM)
-    #     f = i + ufl.grad(u)
-    #     c = f.T * f
-    #     e = 0.5 * (c - i)
-    #     j = ufl.det(f)
-    #     q = (
-    #         GCC_CONS[1] * e[0,0]**2 + 
-    #         GCC_CONS[2] * (e[1,1]**2) + 
-    #         GCC_CONS[3] * (2*e[0,1]*e[1,0])
-    #     )
-    #     s = GCC_CONS[0]/4 * ufl.exp(q) * ufl.as_matrix([
-    #         [4*GCC_CONS[1]*e[0,0], 2*GCC_CONS[3]*(e[1,0] + e[0,1])],
-    #         [2*GCC_CONS[3]*(e[0,1] + e[1,0]), 4*GCC_CONS[2]*e[1,1]],
-    #     ]) - p * ufl.inv(c)
-    #     sig = 1/j * f*s*f.T
-    #     return sig
-    # #    (1): Create Tensor Function Space
-    # #    (2): Define expression over points
-    # #    (3): Create function variable
-    # #    (4): Interpolate
-    # TS = FunctionSpace(domain, ("CG", elem_order, (2,2)))
-    # piola_expr = Expression(cauchy(u_sol, p_sol), TS.element.interpolation_points())
-    # sig = Function(TS)
-    # sig.interpolate(piola_expr)
+    # +==+ Setup stress output
+    def cauchy_tensor(u, p, x, r):
+        # += Tensor Indices
+        i, j = ufl.indices(2)
+        # += Curvilinear Mapping
+        Push = ufl.as_matrix([
+            [ufl.cos(r), -ufl.sin(r)],
+            [ufl.sin(r), ufl.cos(r)]
+        ])
+        x_nu = ufl.inv(Push) * x
+        u_nu = ufl.inv(Push) * u
+        nu = ufl.inv(Push) * (x + u_nu)
+        # += Metric Tensors
+        Z_un = ufl.grad(x_nu).T * ufl.grad(x_nu)
+        Z_co = ufl.grad(nu).T * ufl.grad(nu)
+        # += Kinematics
+        I = ufl.variable(ufl.Identity(MESH_DIM))
+        F = ufl.as_tensor(I[i, j] + ufl.grad(u)[i, j], [i, j]) * Push
+        E = ufl.variable(ufl.as_tensor((0.5*(Z_co[i,j] - Z_un[i,j])), [i, j]))
+        J = ufl.variable(ufl.det(F))
+        # += Material Setup | Guccione
+        Q = (
+            fibre_val * E[0,0]**2 + 
+            MATERIAL_CONSTANTS[2] * (E[1,1]**2) + 
+            MATERIAL_CONSTANTS[3] * (2*E[0,1]*E[1,0])
+        )
+        piola = MATERIAL_CONSTANTS[0]/4 * ufl.exp(Q) * ufl.as_matrix([
+            [4*fibre_val*E[0,0], 2*MATERIAL_CONSTANTS[3]*(E[1,0] + E[0,1])],
+            [2*MATERIAL_CONSTANTS[3]*(E[0,1] + E[1,0]), 4*MATERIAL_CONSTANTS[2]*E[1,1]],
+        ]) - p * Z_un
+        sig = 1/J * F*piola*F.T
+        return sig
 
-    # += Export
-    strains = w.sub(0).collapse()
-    strains.name = "eps"
-    # stresses = sig
-    # stresses.name = "sig"
-    with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_eps.bp", strains, engine="BP4") as vtx:
+    # += Setup tensor space for stress tensor interpolation
+    TS = FunctionSpace(mesh=domain, element=("CG", elem_order, (2,2)))
+    cauchy = Expression(
+        e=cauchy_tensor(w.sub(0).collapse(), w.sub(1).collapse(), x, fibre_rot), X=TS.element.interpolation_points()
+    )
+
+    # += Export data
+    disp = w.sub(0).collapse()
+    disp.name = "U - Displacement"
+    sig = Function(TS)
+    sig.interpolate(cauchy)
+    sig.name = "S - Cauchy Stress"
+    # += Write
+    with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_EPS.bp", disp, engine="BP4") as vtx:
         vtx.write(0)
         vtx.close()
-    # with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + "_sig.bp", stresses, engine="BP4") as vtx:
-    #     vtx.write(0)
-    #     vtx.close()
+    with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_SIG.bp", sig, engine="BP4") as vtx:
+        vtx.write(0)
+        vtx.close()
     
 # +==+==+
 # Main check for script operation.
