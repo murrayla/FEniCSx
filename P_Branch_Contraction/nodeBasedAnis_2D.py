@@ -11,13 +11,14 @@
 # += Imports
 from dolfinx import io,  default_scalar_type
 from dolfinx.fem import Function, FunctionSpace, dirichletbc, locate_dofs_topological, Expression
-from dolfinx.fem.petsc import NonlinearProblem
+from dolfinx.fem.petsc import NonlinearProblem, set_bc
 from dolfinx.mesh import locate_entities_boundary, meshtags
 from dolfinx.nls.petsc import NewtonSolver
 from mpi4py import MPI
 import numpy as np
 import ufl
 # += Parameters
+ITS = 5
 ROT = np.arctan(0.3/1)
 NULL = 0.0
 UNIT = 1.0
@@ -53,7 +54,7 @@ def main(test_name, elem_order, quad_order, ID):
     Vy, dofsY = V.sub(Y).collapse()
 
     # +==+ Boundary Condition Setup
-    def boundary_conditions(domain, W, Vx, Vy):
+    def boundary_conditions(domain, W, Vx, Vy, du):
         # += Facet assignment
         fdim = MESH_DIM - 1
         x0_ft = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[0], 0))
@@ -77,9 +78,9 @@ def main(test_name, elem_order, quad_order, ID):
         y_dofs_at_x1 = locate_dofs_topological(V=(W.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=x1_ft)
         # += Interpolate 
         ux_at_x0, uy_at_x0, ux_at_x1, uy_at_x1 = Function(Vx), Function(Vy), Function(Vx), Function(Vy)
-        ux_at_x0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(DISPLACEMENT)))
+        ux_at_x0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
         uy_at_x0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(NULL)))
-        ux_at_x1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-DISPLACEMENT)))
+        ux_at_x1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-du)))
         uy_at_x1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(NULL)))
         # += Create Dirichlet over subdomains
         bc_UxX0 = dirichletbc(value=ux_at_x0, dofs=x_dofs_at_x0, V=W.sub(0).sub(X))
@@ -90,17 +91,17 @@ def main(test_name, elem_order, quad_order, ID):
         return [bc_UxX0, bc_UyX0, bc_UxX1, bc_UyX1], ft
     
     # += Extract boundary conditions and facet tags
-    bc, ft = boundary_conditions(domain, W, Vx, Vy)
+    bc, ft = boundary_conditions(domain, W, Vx, Vy, DISPLACEMENT)
     
     # +==+ Subdomain Setup
-    def subdomain_assignments(domain, ct):
+    V_1DG = FunctionSpace(domain, ("DG", 0))
+    def subdomain_assignments(domain, ct, V_1DG):
         # += Locate cells of interest
         str_myo = ct.find(GROUP_IDS["Straight"])
         inc_myo = ct.find(GROUP_IDS["Incline"])
         dec_myo = ct.find(GROUP_IDS["Decline"])
         cytosol = ct.find(GROUP_IDS["Cytosol"])
         # += Create 1-DOF space for assignment
-        V_1DG = FunctionSpace(domain, ("DG", 0))
         fibre_rot, fibre_val = Function(V_1DG), Function(V_1DG)
         # += Conditionally assign rotation and material value
         if len(str_myo):
@@ -118,12 +119,16 @@ def main(test_name, elem_order, quad_order, ID):
         return fibre_rot, fibre_val
     
     # += Define rotation and material value
-    fibre_rot, fibre_val = subdomain_assignments(domain, ct)
+    fibre_rot, fibre_val = subdomain_assignments(domain, ct, V_1DG)
 
     # +==+ Variational Problem Setup
     # += Test and Trial Parameters
-    u, p = ufl.split(w)
+    u_, p = ufl.split(w)
     v, q = ufl.TestFunctions(W)
+    uh = Function(V)
+    uh.x.array[:] = np.full_like(uh.x.array[:], NULL, dtype=default_scalar_type)
+    u = u_ + uh
+
     # += Coordinate values
     x = Function(V)
     x.interpolate(lambda x: (x[0], x[1]))
@@ -180,6 +185,7 @@ def main(test_name, elem_order, quad_order, ID):
     solver.atol = TOLERANCE
     solver.rtol = TOLERANCE
     solver.convergence_criterion = "incremental"
+
     # += Solve
     num_its, converged = solver.solve(w)
     if converged:
@@ -219,11 +225,35 @@ def main(test_name, elem_order, quad_order, ID):
         ]) - p * Z_un
         sig = 1/J * F*piola*F.T
         return sig
+    
+    # +==+ Setup strain output
+    def green_tensor(u, p, x, r):
+        # += Tensor Indices
+        i, j = ufl.indices(2)
+        # += Curvilinear Mapping
+        Push = ufl.as_matrix([
+            [ufl.cos(r), -ufl.sin(r)],
+            [ufl.sin(r), ufl.cos(r)]
+        ])
+        x_nu = ufl.inv(Push) * x
+        u_nu = ufl.inv(Push) * u
+        nu = ufl.inv(Push) * (x + u_nu)
+        # += Metric Tensors
+        Z_un = ufl.grad(x_nu).T * ufl.grad(x_nu)
+        Z_co = ufl.grad(nu).T * ufl.grad(nu)
+        # += Kinematics
+        I = ufl.variable(ufl.Identity(MESH_DIM))
+        F = ufl.as_tensor(I[i, j] + ufl.grad(u)[i, j], [i, j]) * Push
+        E = ufl.as_tensor((0.5*(Z_co[i,j] - Z_un[i,j])), [i, j])
+        return ufl.as_tensor([[E[0, 0], E[0, 1]], [E[0, 1], E[1, 1]]])
 
     # += Setup tensor space for stress tensor interpolation
     TS = FunctionSpace(mesh=domain, element=("CG", elem_order, (2,2)))
     cauchy = Expression(
         e=cauchy_tensor(w.sub(0).collapse(), w.sub(1).collapse(), x, fibre_rot), X=TS.element.interpolation_points()
+    )
+    epsilon = Expression(
+        e=green_tensor(w.sub(0).collapse(), w.sub(1).collapse(), x, fibre_rot), X=TS.element.interpolation_points()
     )
 
     # += Export data
@@ -232,8 +262,14 @@ def main(test_name, elem_order, quad_order, ID):
     sig = Function(TS)
     sig.interpolate(cauchy)
     sig.name = "S - Cauchy Stress"
+    eps = Function(TS)
+    eps.interpolate(epsilon)
+    eps.name = "E - Green Strain"
     # += Write
-    with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_EPS.bp", disp, engine="BP4") as vtx:
+    with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_DISP.bp", disp, engine="BP4") as vtx:
+        vtx.write(0)
+        vtx.close()
+    with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_EPS.bp", eps, engine="BP4") as vtx:
         vtx.write(0)
         vtx.close()
     with io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_SIG.bp", sig, engine="BP4") as vtx:
@@ -252,4 +288,4 @@ if __name__ == '__main__':
     # += Quadature Degree
     quad_order = 4
     # += Feed Main()
-    main(test_name, elem_order, quad_order, ID="_5PCT")
+    main(test_name, elem_order, quad_order, ID="_TESTINGITERATION")
