@@ -184,17 +184,6 @@ def gmsh_cube(test_name, test_case):
         # += MANUALLY SUPPLY LABELS
         print("     += DECLARE SUFRACE FOR {} @ COM: {}".format(test_name, com))
         dec = int(input(" ~+ Enter: "))
-        # if np.any(ev_check):
-        #     even.append(surface[1])
-        #     continue
-        # if np.any(lw_check):
-        #     lower.append(surface[1])
-        #     continue
-        # if np.any(up_check):
-        #     upper.append(surface[1])
-        #     continue
-        # else:
-        #     remain.append(surface[1])
         if dec == 0:
             even.append(surface[1])
             continue
@@ -227,13 +216,13 @@ def gmsh_cube(test_name, test_case):
     # += Crete distance field to begin mesh generation
     gmsh.model.mesh.field.add("Distance", DIST_TAG)
     # gmsh.model.mesh.field.setNumbers(DIST_TAG, "PointsList", cent_tgs)
-    gmsh.model.mesh.field.setNumbers(DIST_TAG, "CurvesList", br_tgs)
+    gmsh.model.mesh.field.setNumbers(DIST_TAG, "CurvesList", cv_tgs)
     gmsh.model.mesh.field.setNumber(1, "Sampling", 100)
     # += Create threshold field
     gmsh.model.mesh.field.add("Threshold", THRE_TAG)
     # gmsh.model.mesh.field.setNumber(THRE_TAG, "Sigmoid", True)
     gmsh.model.mesh.field.setNumber(THRE_TAG, "InField", DIST_TAG)
-    gmsh.model.mesh.field.setNumber(THRE_TAG, "SizeMin", 0.02)
+    gmsh.model.mesh.field.setNumber(THRE_TAG, "SizeMin", 0.05)
     gmsh.model.mesh.field.setNumber(THRE_TAG, "SizeMax", 1)
     gmsh.model.mesh.field.setNumber(THRE_TAG, "DistMin", 0.05)
     gmsh.model.mesh.field.setNumber(THRE_TAG, "DistMax", 1)
@@ -254,9 +243,11 @@ def gmsh_cube(test_name, test_case):
 
     # += Generate Mesh
     gmsh.model.mesh.generate(dim=DIM)
+    gmsh.model.mesh.refine()
+    gmsh.model.mesh.refine()
     gmsh.model.mesh.setOrder(order=ORDER)
     # += Write File
-    gmsh.write("P_Branch_Contraction/gmsh_msh/SUB_" + test_name + ".msh")
+    gmsh.write("P_Branch_Contraction/gmsh_msh/SUB_RED" + test_name + ".msh")
     gmsh.finalize()
 
 # +==+==+==+
@@ -278,8 +269,12 @@ if __name__ == '__main__':
         "DOUBLE_ACROSS", "BRANCH_ACROSS", "BRANCH_MIDDLE", 
         "TRANSFER_DOUBLE"
     ]
+    # test = [
+    #     "CYTOSOL"
+    # ]
     test_name = ["QUAD_XX_" + x for x in test]
     # += Cases
     test_case = list(range(0, 7, 1))
+    # test_case = list(range(0, 1, 1))
     # += Feed Main()
     main(test_name, test_case)
