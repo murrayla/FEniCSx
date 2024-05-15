@@ -95,14 +95,31 @@ def gmsh_cube(test_name, test_case):
 
     # += Load Connectivity and Centroids
     cmat, cenn = csvnet(test_name)
-    # += Create points from centroids
+    x_hat = np.average(cenn[:, 0])
+    y_hat = np.average(cenn[:, 1])
+    cenn_nu = np.zeros_like(cenn)
+    cenn_al = np.zeros_like(cenn)
     for i, (x, y, z) in enumerate(cenn):
+        x_nu = np.matmul(
+            np.array([(x-x_hat)/max(cenn[:,0]), (y-y_hat)/max(cenn[:,1])]).T,
+            np.array([[np.cos(np.pi/4), np.sin(np.pi/4)], [-np.sin(np.pi/4), np.cos(np.pi/4)]])
+        )
+        cenn_nu[i, :] = [x_nu[0]+0.5, x_nu[1]+0.5, 0]
+    for i, (x, y, z) in enumerate(cenn_nu):
+        cenn_al[i, :] = [
+            (x-min(cenn_nu[:, 0]))/(max(cenn_nu[:, 0]) - min(cenn_nu[:, 0])), 
+            (y-min(cenn_nu[:, 1]))/(max(cenn_nu[:, 1]) - min(cenn_nu[:, 1])) * 0.6 + 0.2, 
+            0
+        ]
+    print(cenn_al)
+    # += Create points from centroids
+    for i, (x, y, z) in enumerate(cenn_al):
         # += Create Point above each Centroid at sarc radius
-        pt = gmsh.model.occ.addPoint(x=x, y=y-SARC_RADIUS, z=z, meshSize=0.5, tag=max(pt_tgs)+1)
+        pt = gmsh.model.occ.addPoint(x=x, y=y-SARC_RADIUS, z=0, meshSize=1, tag=max(pt_tgs)+1)
         pt_tgs.append(pt)
         below_tgs.append(pt)
         # += Create Point below each Centroid at sarc radius
-        pt = gmsh.model.occ.addPoint(x=x, y=y+SARC_RADIUS, z=z, meshSize=0.5, tag=max(pt_tgs)+1)
+        pt = gmsh.model.occ.addPoint(x=x, y=y+SARC_RADIUS, z=0, meshSize=1, tag=max(pt_tgs)+1)
         pt_tgs.append(pt)
         above_tgs.append(pt)
         # += Create Line between each of these new points
@@ -146,8 +163,8 @@ def gmsh_cube(test_name, test_case):
     gmsh.model.occ.synchronize()
 
     # += Create points from centroids
-    for i, (x, y, z) in enumerate(cenn):
-        pt = gmsh.model.occ.addPoint(x=x, y=y, z=z, meshSize=0.5, tag=max(pt_tgs)+100)
+    for i, (x, y, z) in enumerate(cenn_al):
+        pt = gmsh.model.occ.addPoint(x=x, y=y, z=0, meshSize=1, tag=max(pt_tgs)+100)
         pt_tgs.append(pt)
         cent_tgs.append(pt)
     gmsh.model.occ.synchronize()
@@ -211,30 +228,30 @@ def gmsh_cube(test_name, test_case):
     gmsh.model.addPhysicalGroup(1, left, LEFT_SIDE, "X0")
     gmsh.model.addPhysicalGroup(1, right, RIGHT_SIDE, "X1")
 
-    # +==+==+
-    # Create Mesh fields
-    # += Crete distance field to begin mesh generation
-    gmsh.model.mesh.field.add("Distance", DIST_TAG)
-    # gmsh.model.mesh.field.setNumbers(DIST_TAG, "PointsList", cent_tgs)
-    gmsh.model.mesh.field.setNumbers(DIST_TAG, "CurvesList", cv_tgs)
-    gmsh.model.mesh.field.setNumber(1, "Sampling", 100)
-    # += Create threshold field
-    gmsh.model.mesh.field.add("Threshold", THRE_TAG)
-    # gmsh.model.mesh.field.setNumber(THRE_TAG, "Sigmoid", True)
-    gmsh.model.mesh.field.setNumber(THRE_TAG, "InField", DIST_TAG)
-    gmsh.model.mesh.field.setNumber(THRE_TAG, "SizeMin", 0.05)
-    gmsh.model.mesh.field.setNumber(THRE_TAG, "SizeMax", 1)
-    gmsh.model.mesh.field.setNumber(THRE_TAG, "DistMin", 0.05)
-    gmsh.model.mesh.field.setNumber(THRE_TAG, "DistMax", 1)
-    # += Create minimum field
-    gmsh.model.mesh.field.add("Min", MINF_TAG)
-    gmsh.model.mesh.field.setNumbers(MINF_TAG, "FieldsList", [THRE_TAG])
-    # += Set min field as background mesh
-    gmsh.model.mesh.field.setAsBackgroundMesh(MINF_TAG)
-    # += Set and Stabalise meshing
-    gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
-    gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
-    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
+    # # +==+==+
+    # # Create Mesh fields
+    # # += Crete distance field to begin mesh generation
+    # gmsh.model.mesh.field.add("Distance", DIST_TAG)
+    # # gmsh.model.mesh.field.setNumbers(DIST_TAG, "PointsList", cent_tgs)
+    # gmsh.model.mesh.field.setNumbers(DIST_TAG, "CurvesList", cv_tgs)
+    # gmsh.model.mesh.field.setNumber(1, "Sampling", 100)
+    # # += Create threshold field
+    # gmsh.model.mesh.field.add("Threshold", THRE_TAG)
+    # # gmsh.model.mesh.field.setNumber(THRE_TAG, "Sigmoid", True)
+    # gmsh.model.mesh.field.setNumber(THRE_TAG, "InField", DIST_TAG)
+    # gmsh.model.mesh.field.setNumber(THRE_TAG, "SizeMin", 0.5)
+    # gmsh.model.mesh.field.setNumber(THRE_TAG, "SizeMax", 1)
+    # gmsh.model.mesh.field.setNumber(THRE_TAG, "DistMin", 0.05)
+    # gmsh.model.mesh.field.setNumber(THRE_TAG, "DistMax", 1)
+    # # += Create minimum field
+    # gmsh.model.mesh.field.add("Min", MINF_TAG)
+    # gmsh.model.mesh.field.setNumbers(MINF_TAG, "FieldsList", [THRE_TAG])
+    # # += Set min field as background mesh
+    # gmsh.model.mesh.field.setAsBackgroundMesh(MINF_TAG)
+    # # += Set and Stabalise meshing
+    # gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
+    # gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
+    # gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
 
 
     # += set "Delaunay" algorithm for meshing due to complex gradients
@@ -247,6 +264,7 @@ def gmsh_cube(test_name, test_case):
     gmsh.model.mesh.refine()
     gmsh.model.mesh.setOrder(order=ORDER)
     # += Write File
+
     gmsh.write("P_Branch_Contraction/gmsh_msh/SUB_RED" + test_name + ".msh")
     gmsh.finalize()
 
@@ -264,17 +282,17 @@ if __name__ == '__main__':
     # +==+==+
     # Test Parameters
     # += Test name
-    test = [
-        "SINGLE_MIDDLE", "SINGLE_DOUBLE", "SINGLE_ACROSS", 
-        "DOUBLE_ACROSS", "BRANCH_ACROSS", "BRANCH_MIDDLE", 
-        "TRANSFER_DOUBLE"
-    ]
     # test = [
-    #     "CYTOSOL"
+    #     "SINGLE_MIDDLE", "SINGLE_DOUBLE", "SINGLE_ACROSS", 
+    #     "DOUBLE_ACROSS", "BRANCH_ACROSS", "BRANCH_MIDDLE", 
+    #     "TRANSFER_DOUBLE"
     # ]
+    test = [
+        "28"
+    ]
     test_name = ["QUAD_XX_" + x for x in test]
     # += Cases
-    test_case = list(range(0, 7, 1))
+    test_case = list(range(0, 1, 1))
     # test_case = list(range(0, 1, 1))
     # += Feed Main()
-    main(test_name, test_case)
+    main(["28"], test_case)

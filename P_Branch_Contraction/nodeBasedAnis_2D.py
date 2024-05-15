@@ -26,8 +26,8 @@ X, Y = 0, 1
 GEOM_DIM = 2
 MESH_DIM = 2
 TOLERANCE = 1e-5
-DISPLACEMENT = 0.03
-MATERIAL_CONSTANTS = [0.5, 5, 1, 1]
+DISPLACEMENT = 0.20
+MATERIAL_CONSTANTS = [1, 1, 0.5, 0.5]
 FACET_TAGS = {"x0": 1, "x1": 2, "y0": 3, "y1": 4, "area": 5}
 GROUP_IDS = {"Cytosol": 1, "Straight": 2, "Incline": 3, "Decline": 4, "x0": 5, "x1": 6}
 
@@ -57,38 +57,38 @@ def main(test_name, elem_order, quad_order, ID):
     def boundary_conditions(domain, W, Vx, Vy, du):
         # += Facet assignment
         fdim = MESH_DIM - 1
-        x0_ft = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[0], 0))
-        x1_ft = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[0], 1))
-        y0_ft = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[1], 0))
-        y1_ft = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[1], 1))
-        mfacets = np.hstack([x0_ft, x1_ft, y0_ft, y1_ft])
+        x0_ft = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[0], min(x[0])))
+        x1_ft = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[0], max(x[0])))
+        y0_ft = locate_entities_boundary(mesh=domain, dim=fdim, marker=lambda x: np.isclose(x[1], min(x[1])))
+        mfacets = np.hstack([x0_ft, y0_ft])
         # += Assign boundaries IDs and sort
         mvalues = np.hstack([
             np.full_like(x0_ft, FACET_TAGS["x0"]), 
-            np.full_like(x1_ft, FACET_TAGS["x1"]),
-            np.full_like(y0_ft, FACET_TAGS["y0"]), 
-            np.full_like(y1_ft, FACET_TAGS["y1"]),
+            np.full_like(x1_ft, FACET_TAGS["x0"]), 
+            np.full_like(y0_ft, FACET_TAGS["x1"])
         ])
         sfacets = np.argsort(mfacets)
         ft = meshtags(mesh=domain, dim=fdim, entities=mfacets[sfacets], values=mvalues[sfacets])
         # += Locate subdomain dofs
         x_dofs_at_x0 = locate_dofs_topological(V=(W.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=x0_ft)
-        y_dofs_at_x0 = locate_dofs_topological(V=(W.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=x0_ft)
+        # y_dofs_at_x0 = locate_dofs_topological(V=(W.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=x0_ft)
         x_dofs_at_x1 = locate_dofs_topological(V=(W.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=x1_ft)
-        y_dofs_at_x1 = locate_dofs_topological(V=(W.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=x1_ft)
+        # y_dofs_at_x1 = locate_dofs_topological(V=(W.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=x1_ft)
+        # x_dofs_at_y1 = locate_dofs_topological(V=(W.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=y0_ft)
+        y_dofs_at_y1 = locate_dofs_topological(V=(W.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=y0_ft)
         # += Interpolate 
         ux_at_x0, uy_at_x0, ux_at_x1, uy_at_x1 = Function(Vx), Function(Vy), Function(Vx), Function(Vy)
-        ux_at_x0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
+        ux_at_x0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(NULL)))
         uy_at_x0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(NULL)))
         ux_at_x1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-du)))
         uy_at_x1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(NULL)))
         # += Create Dirichlet over subdomains
         bc_UxX0 = dirichletbc(value=ux_at_x0, dofs=x_dofs_at_x0, V=W.sub(0).sub(X))
-        bc_UyX0 = dirichletbc(value=uy_at_x0, dofs=y_dofs_at_x0, V=W.sub(0).sub(Y))
+        bc_UyX0 = dirichletbc(value=uy_at_x0, dofs=y_dofs_at_y1, V=W.sub(0).sub(Y))
         bc_UxX1 = dirichletbc(value=ux_at_x1, dofs=x_dofs_at_x1, V=W.sub(0).sub(X))
-        bc_UyX1 = dirichletbc(value=uy_at_x1, dofs=y_dofs_at_x1, V=W.sub(0).sub(Y))
+        # bc_UyX1 = dirichletbc(value=uy_at_x1, dofs=y_dofs_at_x1, V=W.sub(0).sub(Y))
         # += Assign
-        return [bc_UxX0, bc_UyX0, bc_UxX1, bc_UyX1], ft
+        return [bc_UxX0, bc_UyX0, bc_UxX1], ft
     
     # += Extract boundary conditions and facet tags
     bc, ft = boundary_conditions(domain, W, Vx, Vy, DISPLACEMENT)
@@ -115,7 +115,7 @@ def main(test_name, elem_order, quad_order, ID):
             fibre_val.x.array[dec_myo] = np.full_like(dec_myo, MATERIAL_CONSTANTS[1], dtype=default_scalar_type)
         if len(cytosol):
             fibre_rot.x.array[cytosol] = np.full_like(cytosol, NULL, dtype=default_scalar_type)
-            fibre_val.x.array[cytosol] = np.full_like(cytosol, UNIT, dtype=default_scalar_type)
+            fibre_val.x.array[cytosol] = np.full_like(cytosol, 0.5, dtype=default_scalar_type)
         return fibre_rot, fibre_val
     
     # += Define rotation and material value
@@ -282,10 +282,29 @@ def main(test_name, elem_order, quad_order, ID):
 if __name__ == '__main__':
     # +==+ Test Parameters
     # += Test name
-    test_name = "SUB_REDQUAD_XX_TRANSFER_DOUBLE"
+    test = [
+        "SINGLE_MIDDLE", "SINGLE_DOUBLE", "SINGLE_ACROSS", 
+        "DOUBLE_ACROSS", "BRANCH_ACROSS", "BRANCH_MIDDLE", 
+        "TRANSFER_DOUBLE", "CYTOSOL"
+    ]
+    # test = [
+    #     "SINGLE_MIDDLE"
+    # ]
+    # test_name = "SUB_REDQUAD_XX_TRANSFER_DOUBLE"
+    test_name = ["SUB_REDQUAD_XX_" + x for x in test]
     # += Element order
     elem_order = 2
     # += Quadature Degree
     quad_order = 4
     # += Feed Main()
-    main(test_name, elem_order, quad_order, ID="_TESTINGITERATION")
+    count = 0
+    for name in test_name:
+        # main(name, elem_order, quad_order, ID="_TEST")
+        try:
+            main(name, elem_order, quad_order, ID="_20pctRHSxBOTy")
+            count += 1
+        except:
+            count -= 1
+            continue
+            
+    print(" WE COMPLETED: {}".format(count))
