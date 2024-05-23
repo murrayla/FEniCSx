@@ -171,6 +171,7 @@ def gmsh_cube(test_name, test_case):
                 mdl.addPhysicalGroup(dim=3, tags=[c[0][1]], name="VOLUME_" + "Myofibril_" + str(e))
                 e += 1
 
+    # += Check on surface entitites to seperate on an overlap of z-disc
     surf_ents = occ.get_entities(dim=DIM-1)
     coms = np.array(
         [
@@ -194,6 +195,44 @@ def gmsh_cube(test_name, test_case):
             ovlp.append(curr)
             occ.fragment([(DIM-1, curr[0])], [(DIM-1, i) for i in curr[1::]], removeObject=True, removeTool=True)
             occ.synchronize()
+
+    # += Check on volume entitites to determine if there are overlapping components
+    volm_ents = occ.get_entities(dim=DIM)
+    volm_ents.remove((3, VOLUME))
+
+    def check_intersect(obj, too):
+        occ.intersect(obj, too, tag=-1, removeObject=False, removeTool=False)
+        if intscpt[0]:
+            return True, intscpt
+        else:
+            return False
+        
+    def remove_overlaps(intscpt):
+        occ.fragment([(DIM, intscpt[0])], [(DIM, i) for i in intscpt[1::]], removeObject=True, removeTool=True)
+
+    def clean_volumes(volm_ents):
+        volm_ents.remove((3, VOLUME))
+        if 
+        check_intersect(volm_ents[0], volm_ents[1])
+        volm_ents = occ.get_entities(dim=DIM)
+
+    check_intscpt = True
+    while check_intscpt:
+        volm_ents = occ.get_entities(dim=DIM)
+        volm_ents.remove((3, VOLUME))
+        for j, (d_c, e_c) in enumerate(volm_ents):
+            curr = [e_c]
+            next = volm_ents[j+1::]
+            for l, (d_n, e_n) in enumerate(next):
+                check_intscpt, intscpt = check_intersect([(d_c, e_c)], [(d_n, e_n)])
+                if intscpt[0]:
+                    check_ = 1
+                    curr.append(e_n)
+            if not(check_):
+                check_intscpt = False 
+            ovlp_vol.append(curr)
+        
+    exit()
  
     # # += Fragment the existing surfaces into new surfaces that are joined at nodes
     # occ.fragment([(3, VOLUME)], [(3, i) for i in volume_tgs], removeObject=True, removeTool=True)
