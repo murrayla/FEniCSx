@@ -23,7 +23,7 @@ MINF_TAG = 3
 DELAUNAY = 5
 SARC_RADIUS = 10
 NAP_X, NAP_Y, NAP_Z = 110, 110, 40
-EXT = 0.3
+EXT = 0.0
 MAX_X, MAX_Y, MAX_Z = NAP_X+NAP_X*EXT, NAP_Y+NAP_Y*EXT, NAP_Z+NAP_Z*EXT
 MIN_X, MIN_Y, MIN_Z = -NAP_X*EXT, -NAP_Y*EXT, -NAP_Z*EXT
 DIS_X, DIS_Y, DIS_Z = MAX_X+MIN_X, MAX_Y+MIN_Y, MAX_Z+MIN_Z
@@ -120,8 +120,6 @@ def gmsh_cube(test_name, test_case):
             occ.synchronize()
         if d == 3: 
             vo_tgs.append(e)
-            mdl.addPhysicalGroup(dim=d, tags=[VOLUME], name="VOLUME_" + "Cytosol")
-            occ.synchronize()
 
     # += Load Connectivity and Centroids
     cmat, cenn = csvnet(test_name.split("_")[2])
@@ -155,7 +153,7 @@ def gmsh_cube(test_name, test_case):
         lo_tgs.append(zl)
         occ.synchronize()
         # += Assign Physical groups
-        mdl.addPhysicalGroup(dim=1, tags=[cv], name="SURF_" + "Disc_" + str(zl))                  
+        # mdl.addPhysicalGroup(dim=1, tags=[cv], name="SURF_" + "Disc_" + str(zl))                  
         zs_tgs.append(zl)
 
     # += Create lines from connection matrix
@@ -168,15 +166,14 @@ def gmsh_cube(test_name, test_case):
                 c = occ.addThruSections(wireTags=[zs_tgs[j], zs_tgs[l+j]], tag=e, makeSolid=True, makeRuled=False)
                 volume_tgs.append(c[0][1])
                 occ.synchronize()
-                mdl.addPhysicalGroup(dim=3, tags=[c[0][1]], name="VOLUME_" + "Myofibril_" + str(e))
                 e += 1
 
     # += Check on surface entitites to seperate on an overlap of z-disc
-    surf_ents = occ.get_entities(dim=DIM-1)
+    ents = occ.get_entities(dim=DIM-1)
     coms = np.array(
         [
             [occ.getCenterOfMass(d, e)[0], occ.getCenterOfMass(d, e)[1], occ.getCenterOfMass(d, e)[2]] 
-            for (d, e) in surf_ents
+            for (d, e) in ents
         ]
     )
     dmat = distance_matrix(coms, coms)
@@ -197,42 +194,73 @@ def gmsh_cube(test_name, test_case):
             occ.synchronize()
 
     # += Check on volume entitites to determine if there are overlapping components
-    volm_ents = occ.get_entities(dim=DIM)
-    volm_ents.remove((3, VOLUME))
 
     def check_intersect(obj, too):
-        occ.intersect(obj, too, tag=-1, removeObject=False, removeTool=False)
+        try:
+            intscpt = occ.intersect(obj, too, tag=-1, removeObject=False, removeTool=False)
+            occ.synchronize()
+        except:
+            return False, None
         if intscpt[0]:
             return True, intscpt
         else:
-            return False
+            return False, None
         
-    def remove_overlaps(intscpt):
-        occ.fragment([(DIM, intscpt[0])], [(DIM, i) for i in intscpt[1::]], removeObject=True, removeTool=True)
+    def remove_overlaps(intscpt, dim):
+        occ.synchronize()
+        try:
+            occ.fragment([(dim, intscpt[0][0][1])], [(dim, i[0][1]) for i in intscpt[1::]], removeObject=True, removeTool=True)
+        except:
+            return
+        occ.synchronize()
 
-    def clean_volumes(volm_ents):
-        volm_ents.remove((3, VOLUME))
-        if 
-        check_intersect(volm_ents[0], volm_ents[1])
-        volm_ents = occ.get_entities(dim=DIM)
-
-    check_intscpt = True
-    while check_intscpt:
-        volm_ents = occ.get_entities(dim=DIM)
-        volm_ents.remove((3, VOLUME))
-        for j, (d_c, e_c) in enumerate(volm_ents):
-            curr = [e_c]
-            next = volm_ents[j+1::]
-            for l, (d_n, e_n) in enumerate(next):
-                check_intscpt, intscpt = check_intersect([(d_c, e_c)], [(d_n, e_n)])
-                if intscpt[0]:
-                    check_ = 1
-                    curr.append(e_n)
-            if not(check_):
-                check_intscpt = False 
-            ovlp_vol.append(curr)
+    for d in range(1, DIM, 1):
+        ents = occ.get_entities(dim=d)
+        ovlp_srf = []
+        for j, obj in enumerate(ents):
+            curr = [[obj]]
+            next = ents[j+1::]
+            for l, too in enumerate(next):
+                check_intscpt, intscpt = check_intersect([obj], [too])
+                if check_intscpt:
+                    curr.append([too])
+            if len(curr) > 1:
+                remove_overlaps(curr, d)
+                ovlp_srf.append(curr)
         
-    exit()
+        for row in ovlp_srf:
+            for col in row:
+                occ.remove(dimTags=col, recursive=True)
+                occ.synchronize()
+
+    ent = occ.get_entities()
+    centre = np.array([DIS_X/2, DIS_Y/2, DIS_Z/2])
+    for (d, e) in ent:
+        if d == DIM-DIM:
+            msh.set_size([(d, e)], 10)
+        if d == DIM-1: 
+            sf_tgs.append(e)
+            com = np.array([x for x in occ.getCenterOfMass(d, e)])
+            for row in cenn_al:
+                if np.allclose(row, com):
+                    mdl.addPhysicalGroup(dim=d, tags=[e], name="SURF_" + "ZDisc" + str(e))
+                    occ.synchronize()
+                    break
+            if e in [XX[0], XX[1], YY[0], YY[1], ZZ[0], ZZ[1]]:
+                continue
+            mdl.addPhysicalGroup(dim=d, tags=[e], name="SURF_" + "ABand" + str(e))
+            occ.synchronize()
+        if d == DIM: 
+            vo_tgs.append(e)
+            com = np.array([x for x in occ.getCenterOfMass(d, e)])
+            if np.allclose(centre, com):
+                mdl.addPhysicalGroup(dim=d, tags=[e], name="VOLUME_" + "Cytosol")
+            else: 
+                mdl.addPhysicalGroup(dim=d, tags=[e], name="VOLUME_" + "Myofibril_" + str(e))
+            occ.synchronize()
+
+    # +z
+    # mdl.addPhysicalGroup(dim=3, tags=[c[0][1]], name="VOLUME_" + "Myofibril_" + str(e))
  
     # # += Fragment the existing surfaces into new surfaces that are joined at nodes
     # occ.fragment([(3, VOLUME)], [(3, i) for i in volume_tgs], removeObject=True, removeTool=True)
@@ -341,7 +369,7 @@ def gmsh_cube(test_name, test_case):
     msh.generate(dim=DIM)
     msh.setOrder(order=ORDER)
     # += Write File
-    gmsh.write("P_Branch_Contraction/gmsh_msh/SUB_RED" + test_name + ".msh")
+    gmsh.write("P_Branch_Contraction/gmsh_msh/SUB_RED_LESS" + test_name + ".msh")
     gmsh.finalize()
 
 # +==+==+==+
