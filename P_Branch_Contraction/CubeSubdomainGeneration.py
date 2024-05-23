@@ -11,6 +11,7 @@
 import csv
 import gmsh
 import numpy as np
+from scipy.spatial import distance_matrix
 # += Constants
 DIM = 3
 RAW = 1
@@ -20,7 +21,12 @@ DIST_TAG = 1
 THRE_TAG = 2
 MINF_TAG = 3
 DELAUNAY = 5
-SARC_RADIUS = 0.1
+SARC_RADIUS = 10
+NAP_X, NAP_Y, NAP_Z = 110, 110, 40
+EXT = 0.3
+MAX_X, MAX_Y, MAX_Z = NAP_X+NAP_X*EXT, NAP_Y+NAP_Y*EXT, NAP_Z+NAP_Z*EXT
+MIN_X, MIN_Y, MIN_Z = -NAP_X*EXT, -NAP_Y*EXT, -NAP_Z*EXT
+DIS_X, DIS_Y, DIS_Z = MAX_X+MIN_X, MAX_Y+MIN_Y, MAX_Z+MIN_Z
 # += Group IDs
 XX = [1, 2]
 YY = [3, 4]
@@ -57,10 +63,17 @@ def gmsh_cube(test_name, test_case):
     gmsh.initialize()
     gmsh.model.add(test_name)
 
+    # += API Setup
+    mdl = gmsh.model
+    occ = mdl.occ
+    msh = mdl.mesh
+
     # += Store entitu tags and assign physical group labels.
     pt_tgs = []
     cv_tgs = []
+    lo_tgs = []
     sf_tgs = []
+    vo_tgs = []
     zs_tgs = []
     br_tgs = []
     cent_tgs = []
@@ -71,183 +84,210 @@ def gmsh_cube(test_name, test_case):
     even_cents = []
     upper_cents = []
     lower_cents = []
+    volume_tgs = []
 
-    # += Create Points 
-    p_coords = [[0, 0], [1, 0], [1, 1], [0, 1]]
-    for i, (x, y) in enumerate(p_coords):
-        pt = gmsh.model.occ.addPoint(x=x, y=y, z=0, meshSize=0.5, tag=i+1)
-        pt_tgs.append(pt)
-    # += Create Lines 
-    c_edge = [[1, 2], [2, 3], [3, 4], [4, 1]]
-    for i, (x, y) in enumerate(c_edge):
-        cv = gmsh.model.occ.addLine(startTag=x, endTag=y, tag=i+1)
-        gmsh.model.occ.synchronize()
-        # gmsh.model.addPhysicalGroup(dim=1, tags=[cv], name="SIDE_" + str(i))
-        cv_tgs.append(cv)
-    # += Create Surface
-    lo = gmsh.model.occ.addCurveLoop([1, 2, 3, 4], 5)
-    sf_tgs.append(lo)
-    sf = gmsh.model.occ.addPlaneSurface([lo], tag=max(sf_tgs)+1)
-    sf_tgs.append(sf)
-    area_tgs.append(sf)
-    gmsh.model.occ.synchronize()
-    # gmsh.model.addPhysicalGroup(dim=2, tags=[6], name="AREA")
+    # += Create cube
+    occ.addBox(
+        x=MIN_X, y=MIN_Y, z=MIN_Z, 
+        dx=MAX_X+abs(MIN_X), dy=MAX_Y+abs(MIN_Y), dz=MAX_Z+abs(MIN_Z), 
+        tag=VOLUME
+    )
+    occ.synchronize()
+    ent = occ.getEntities()
+    curr_ents = []
+    # += Assign physical groups to entitiies 
+    for (d, e) in ent:
+        curr_ents.append(e)
+        if d == 0:
+            pt_tgs.append(e)
+        if d == 1: 
+            cv_tgs.append(e)
+        if d == 2: 
+            sf_tgs.append(e)
+            com = occ.getCenterOfMass(d, e)
+            if np.allclose(com, [MIN_X, DIS_Y/2, DIS_Z/2]):
+                mdl.addPhysicalGroup(dim=d, tags=[XX[0]], name="SURF_" + "xx-")
+            if np.allclose(com, [MAX_X, DIS_Y/2, DIS_Z/2]):
+                mdl.addPhysicalGroup(dim=d, tags=[XX[1]], name="SURF_" + "xx+")
+            if np.allclose(com, [DIS_X/2, MIN_Y, DIS_Z/2]):
+                mdl.addPhysicalGroup(dim=d, tags=[YY[0]], name="SURF_" + "yy-")
+            if np.allclose(com, [DIS_X/2,MAX_Y, DIS_Z/2]):
+                mdl.addPhysicalGroup(dim=d, tags=[YY[1]], name="SURF_" + "yy+")
+            if np.allclose(com, [DIS_X/2, DIS_Y/2, MIN_Z]):
+                mdl.addPhysicalGroup(dim=d, tags=[ZZ[0]], name="SURF_" + "zz-")
+            if np.allclose(com, [DIS_X/2, DIS_Y/2, MAX_Z]):
+                mdl.addPhysicalGroup(dim=d, tags=[ZZ[1]], name="SURF_" + "zz+")
+            occ.synchronize()
+        if d == 3: 
+            vo_tgs.append(e)
+            mdl.addPhysicalGroup(dim=d, tags=[VOLUME], name="VOLUME_" + "Cytosol")
+            occ.synchronize()
 
     # += Load Connectivity and Centroids
-    cmat, cenn = csvnet(test_name)
+    cmat, cenn = csvnet(test_name.split("_")[2])
     x_hat = np.average(cenn[:, 0])
     y_hat = np.average(cenn[:, 1])
+    z_hat = np.average(cenn[:, 2])
     cenn_nu = np.zeros_like(cenn)
     cenn_al = np.zeros_like(cenn)
     for i, (x, y, z) in enumerate(cenn):
         x_nu = np.matmul(
-            np.array([(x-x_hat)/max(cenn[:,0]), (y-y_hat)/max(cenn[:,1])]).T,
-            np.array([[np.cos(np.pi/4), np.sin(np.pi/4)], [-np.sin(np.pi/4), np.cos(np.pi/4)]])
+            np.array([(x-x_hat)/max(cenn[:, 0]), (y-y_hat)/max(cenn[:, 1]), (z-z_hat)/max(cenn[:, 2])]).T, 
+            np.array([[np.cos(np.pi/4), np.sin(np.pi/4), 0], [-np.sin(np.pi/4), np.cos(np.pi/4), 0], [0, 0, 1]])
         )
-        cenn_nu[i, :] = [x_nu[0]+0.5, x_nu[1]+0.5, 0]
+        cenn_nu[i, :] = [x_nu[0]+NAP_X/2, x_nu[1]+NAP_Y/2, x_nu[2]+NAP_Z/2]
     for i, (x, y, z) in enumerate(cenn_nu):
         cenn_al[i, :] = [
-            (x-min(cenn_nu[:, 0]))/(max(cenn_nu[:, 0]) - min(cenn_nu[:, 0])), 
-            (y-min(cenn_nu[:, 1]))/(max(cenn_nu[:, 1]) - min(cenn_nu[:, 1])) * 0.6 + 0.2, 
-            0
+            (x-min(cenn_nu[:, 0]))/(max(cenn_nu[:, 0]) - min(cenn_nu[:, 0])) * NAP_X, 
+            (y-min(cenn_nu[:, 1]))/(max(cenn_nu[:, 1]) - min(cenn_nu[:, 1])) * NAP_Y, 
+            (z-min(cenn_nu[:, 2]))/(max(cenn_nu[:, 2]) - min(cenn_nu[:, 2])) * NAP_Z
         ]
-    print(cenn_al)
-    # += Create points from centroids
+
+    # += Create Circles and Loops for each Z-Disc
+    cv_tgs.append(10)
+    lo_tgs.append(max(cv_tgs)+1)
     for i, (x, y, z) in enumerate(cenn_al):
-        # += Create Point above each Centroid at sarc radius
-        pt = gmsh.model.occ.addPoint(x=x, y=y-SARC_RADIUS, z=0, meshSize=1, tag=max(pt_tgs)+1)
-        pt_tgs.append(pt)
-        below_tgs.append(pt)
-        # += Create Point below each Centroid at sarc radius
-        pt = gmsh.model.occ.addPoint(x=x, y=y+SARC_RADIUS, z=0, meshSize=1, tag=max(pt_tgs)+1)
-        pt_tgs.append(pt)
-        above_tgs.append(pt)
-        # += Create Line between each of these new points
-        cv = gmsh.model.occ.addLine(
-                    startTag=below_tgs[-1], endTag=above_tgs[-1], 
-                    tag=max(max(sf_tgs), max(cv_tgs)) + 1
-                )
+        # += Create circle for Z-Disc
+        cv = occ.addCircle(x=x, y=y, z=z, r=SARC_RADIUS, zAxis=[1, 0, 0])
         cv_tgs.append(cv)
-        zs_tgs.append(cv)
-    gmsh.model.occ.synchronize()
+        # += Create curve loop
+        zl = occ.addCurveLoop(curveTags=[cv], tag=max(lo_tgs)+1)
+        lo_tgs.append(zl)
+        occ.synchronize()
+        # += Assign Physical groups
+        mdl.addPhysicalGroup(dim=1, tags=[cv], name="SURF_" + "Disc_" + str(zl))                  
+        zs_tgs.append(zl)
 
     # += Create lines from connection matrix
+    e = 1
     for j, row in enumerate(cmat):
         row = row[j::]
         for l, k in enumerate(row):
             if k:
-                # += Connect below centroid points
-                cv = gmsh.model.occ.addLine(
-                    startTag=below_tgs[j], endTag=below_tgs[l+j], 
-                    tag=max(max(sf_tgs), max(cv_tgs)) + 1
-                )
-                cv_tgs.append(cv)
-                branch_tgs.append(cv)
-                # += Connect above centroid points
-                cv = gmsh.model.occ.addLine(
-                    startTag=above_tgs[j], endTag=above_tgs[l+j], 
-                    tag=max(max(sf_tgs), max(cv_tgs)) + 1
-                )
-                cv_tgs.append(cv)
-                branch_tgs.append(cv)
-                # += Create surfaces from lines
-                lo = gmsh.model.occ.addCurveLoop([zs_tgs[j], branch_tgs[-1], zs_tgs[j+l], branch_tgs[-2]], tag=max(sf_tgs)+1)
-                sf_tgs.append(lo)
-                sf = gmsh.model.occ.addPlaneSurface([lo], max(sf_tgs)+1)
-                sf_tgs.append(sf)
-                area_tgs.append(sf)
-                gmsh.model.occ.synchronize()
+                # += Connect Z-Discs
+                c = occ.addThruSections(wireTags=[zs_tgs[j], zs_tgs[l+j]], tag=e, makeSolid=True, makeRuled=False)
+                volume_tgs.append(c[0][1])
+                occ.synchronize()
+                mdl.addPhysicalGroup(dim=3, tags=[c[0][1]], name="VOLUME_" + "Myofibril_" + str(e))
+                e += 1
 
-    # += Fragment the existing surfaces into new surfaces that are joined at nodes
-    gmsh.model.occ.fragment([(2, area_tgs[0])], [(2, i) for i in area_tgs[1:]])
-    gmsh.model.occ.synchronize()
-
-    # += Create points from centroids
-    for i, (x, y, z) in enumerate(cenn_al):
-        pt = gmsh.model.occ.addPoint(x=x, y=y, z=0, meshSize=1, tag=max(pt_tgs)+100)
-        pt_tgs.append(pt)
-        cent_tgs.append(pt)
-    gmsh.model.occ.synchronize()
-    # += Create lines from connection matrix
-    for j, row in enumerate(cmat):
+    surf_ents = occ.get_entities(dim=DIM-1)
+    coms = np.array(
+        [
+            [occ.getCenterOfMass(d, e)[0], occ.getCenterOfMass(d, e)[1], occ.getCenterOfMass(d, e)[2]] 
+            for (d, e) in surf_ents
+        ]
+    )
+    dmat = distance_matrix(coms, coms)
+    ovlp = []
+    for j, row in enumerate(dmat):
+        curr = [j]
         row = row[j::]
         for l, k in enumerate(row):
-            if k:
-                cv = gmsh.model.occ.addLine(
-                    startTag=cent_tgs[j], endTag=cent_tgs[l+j], 
-                    tag=max(max(sf_tgs), max(cv_tgs)) + 100
-                )
-                cv_tgs.append(cv)
-                br_tgs.append(cv)
-                centroids = np.array([cenn[j], cenn[j+l]])
-                if cenn[j][1] == cenn[j+l][1]:
-                    av = np.mean(centroids, axis=0)
-                    even_cents.append(av)
-                if cenn[j][1] > cenn[j+l][1]:
-                    av = np.mean(centroids, axis=0)
-                    lower_cents.append(av)
-                if cenn[j][1] < cenn[j+l][1]:
-                    av = np.mean(centroids, axis=0)
-                    upper_cents.append(av)
-    gmsh.model.occ.synchronize()
+            # += Identify Overlap
+            if not(k):
+                continue
+            if np.isclose(coms[j][0], coms[j+l][0]) or np.isclose(coms[j][1], coms[j+l][1]) or np.isclose(coms[j][2], coms[j+l][2]):
+                if k <= SARC_RADIUS*2:
+                    curr.append(l)
+        if len(curr) > 1:
+            ovlp.append(curr)
+            occ.fragment([(DIM-1, curr[0])], [(DIM-1, i) for i in curr[1::]], removeObject=True, removeTool=True)
+            occ.synchronize()
+ 
+    # # += Fragment the existing surfaces into new surfaces that are joined at nodes
+    # occ.fragment([(3, VOLUME)], [(3, i) for i in volume_tgs], removeObject=True, removeTool=True)
+    # occ.synchronize()
+    # surfs = occ.get_entities(dim=DIM-1)
+    # occ.fragment([(2, 101)], [(2, i[1]) for i in surfs], removeObject=True, removeTool=False)
+    # occ.synchronize()
 
-    # += Mark Physical groups
-    even, upper, lower, remain = [], [], [], []
-    for surface in gmsh.model.getEntities(dim=2):
-        com = gmsh.model.occ.getCenterOfMass(surface[0], surface[1])
-        ev_check = [np.allclose(com, x) for x in even_cents]
-        lw_check = [np.allclose(com, x) for x in lower_cents]
-        up_check = [np.allclose(com, x) for x in upper_cents]
-        # += MANUALLY SUPPLY LABELS
-        print("     += DECLARE SUFRACE FOR {} @ COM: {}".format(test_name, com))
-        dec = int(input(" ~+ Enter: "))
-        if dec == 0:
-            even.append(surface[1])
-            continue
-        if dec == 1:
-            lower.append(surface[1])
-            continue
-        if dec == 2:
-            upper.append(surface[1])
-            continue
-        else:
-            remain.append(surface[1])
-    gmsh.model.addPhysicalGroup(2, even, MYO_STRAIGHT, "Straight Sarcomere")
-    gmsh.model.addPhysicalGroup(2, lower, MYO_DNANGLED, "Sarcomere Angled Down")
-    gmsh.model.addPhysicalGroup(2, upper, MYO_UPANGLED, "Sarcomere Angled Up")
-    gmsh.model.addPhysicalGroup(2, remain, CYTOSOL, "Cytosol")
-    # += Mark right and left
-    left, right = [], []
-    for line in gmsh.model.getEntities(dim=1):
-        com = gmsh.model.occ.getCenterOfMass(line[0], line[1])
-        if np.isclose(com[0], 0):
-            left.append(line[1])
-            continue
-        if np.isclose(com[0], 1):
-            right.append(line[1])
-    gmsh.model.addPhysicalGroup(1, left, LEFT_SIDE, "X0")
-    gmsh.model.addPhysicalGroup(1, right, RIGHT_SIDE, "X1")
+    # # += Create points from centroids
+    # for i, (x, y, z) in enumerate(cenn_al):
+    #     pt = occ.addPoint(x=x, y=y, z=z, meshSize=1, tag=max(pt_tgs)+100)
+    #     pt_tgs.append(pt)
+    #     cent_tgs.append(pt)
+    # occ.synchronize()
+    # # += Create lines from connection matrix
+    # for j, row in enumerate(cmat):
+    #     row = row[j::]
+    #     for l, k in enumerate(row):
+    #         if k:
+    #             cv = occ.addLine(
+    #                 startTag=cent_tgs[j], endTag=cent_tgs[l+j], 
+    #                 tag=max(max(sf_tgs), max(cv_tgs)) + 100
+    #             )
+    #             cv_tgs.append(cv)
+    #             br_tgs.append(cv)
+    #             centroids = np.array([cenn[j], cenn[j+l]])
+    #             if cenn[j][1] == cenn[j+l][1]:
+    #                 av = np.mean(centroids, axis=0)
+    #                 even_cents.append(av)
+    #             if cenn[j][1] > cenn[j+l][1]:
+    #                 av = np.mean(centroids, axis=0)
+    #                 lower_cents.append(av)
+    #             if cenn[j][1] < cenn[j+l][1]:
+    #                 av = np.mean(centroids, axis=0)
+    #                 upper_cents.append(av)
+    # occ.synchronize()
+
+    # # += Mark Physical groups
+    # even, upper, lower, remain = [], [], [], []
+    # for surface in mdl.getEntities(dim=2):
+    #     com = occ.getCenterOfMass(surface[0], surface[1])
+    #     ev_check = [np.allclose(com, x) for x in even_cents]
+    #     lw_check = [np.allclose(com, x) for x in lower_cents]
+    #     up_check = [np.allclose(com, x) for x in upper_cents]
+    #     # += MANUALLY SUPPLY LABELS
+    #     print("     += DECLARE SUFRACE FOR {} @ COM: {}".format(test_name, com))
+    #     dec = int(input(" ~+ Enter: "))
+    #     if dec == 0:
+    #         even.append(surface[1])
+    #         continue
+    #     if dec == 1:
+    #         lower.append(surface[1])
+    #         continue
+    #     if dec == 2:
+    #         upper.append(surface[1])
+    #         continue
+    #     else:
+    #         remain.append(surface[1])
+    # mdl.addPhysicalGroup(2, even, MYO_STRAIGHT, "Straight Sarcomere")
+    # mdl.addPhysicalGroup(2, lower, MYO_DNANGLED, "Sarcomere Angled Down")
+    # mdl.addPhysicalGroup(2, upper, MYO_UPANGLED, "Sarcomere Angled Up")
+    # mdl.addPhysicalGroup(2, remain, CYTOSOL, "Cytosol")
+    # # += Mark right and left
+    # left, right = [], []
+    # for line in mdl.getEntities(dim=1):
+    #     com = occ.getCenterOfMass(line[0], line[1])
+    #     if np.isclose(com[0], 0):
+    #         left.append(line[1])
+    #         continue
+    #     if np.isclose(com[0], 1):
+    #         right.append(line[1])
+    # mdl.addPhysicalGroup(1, left, LEFT_SIDE, "X0")
+    # mdl.addPhysicalGroup(1, right, RIGHT_SIDE, "X1")
 
     # # +==+==+
     # # Create Mesh fields
     # # += Crete distance field to begin mesh generation
-    # gmsh.model.mesh.field.add("Distance", DIST_TAG)
-    # # gmsh.model.mesh.field.setNumbers(DIST_TAG, "PointsList", cent_tgs)
-    # gmsh.model.mesh.field.setNumbers(DIST_TAG, "CurvesList", cv_tgs)
-    # gmsh.model.mesh.field.setNumber(1, "Sampling", 100)
+    # msh.field.add("Distance", DIST_TAG)
+    # # msh.field.setNumbers(DIST_TAG, "PointsList", cent_tgs)
+    # msh.field.setNumbers(DIST_TAG, "CurvesList", cv_tgs)
+    # msh.field.setNumber(1, "Sampling", 100)
     # # += Create threshold field
-    # gmsh.model.mesh.field.add("Threshold", THRE_TAG)
-    # # gmsh.model.mesh.field.setNumber(THRE_TAG, "Sigmoid", True)
-    # gmsh.model.mesh.field.setNumber(THRE_TAG, "InField", DIST_TAG)
-    # gmsh.model.mesh.field.setNumber(THRE_TAG, "SizeMin", 0.5)
-    # gmsh.model.mesh.field.setNumber(THRE_TAG, "SizeMax", 1)
-    # gmsh.model.mesh.field.setNumber(THRE_TAG, "DistMin", 0.05)
-    # gmsh.model.mesh.field.setNumber(THRE_TAG, "DistMax", 1)
+    # msh.field.add("Threshold", THRE_TAG)
+    # # msh.field.setNumber(THRE_TAG, "Sigmoid", True)
+    # msh.field.setNumber(THRE_TAG, "InField", DIST_TAG)
+    # msh.field.setNumber(THRE_TAG, "SizeMin", 0.5)
+    # msh.field.setNumber(THRE_TAG, "SizeMax", 1)
+    # msh.field.setNumber(THRE_TAG, "DistMin", 0.05)
+    # msh.field.setNumber(THRE_TAG, "DistMax", 1)
     # # += Create minimum field
-    # gmsh.model.mesh.field.add("Min", MINF_TAG)
-    # gmsh.model.mesh.field.setNumbers(MINF_TAG, "FieldsList", [THRE_TAG])
+    # msh.field.add("Min", MINF_TAG)
+    # msh.field.setNumbers(MINF_TAG, "FieldsList", [THRE_TAG])
     # # += Set min field as background mesh
-    # gmsh.model.mesh.field.setAsBackgroundMesh(MINF_TAG)
+    # msh.field.setAsBackgroundMesh(MINF_TAG)
     # # += Set and Stabalise meshing
     # gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
     # gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
@@ -255,16 +295,13 @@ def gmsh_cube(test_name, test_case):
 
 
     # += set "Delaunay" algorithm for meshing due to complex gradients
-    gmsh.model.occ.synchronize()
-    gmsh.option.setNumber("Mesh.Algorithm", value=DELAUNAY)
+    occ.synchronize()
+    # gmsh.option.setNumber("Mesh.Algorithm", value=DELAUNAY)
 
     # += Generate Mesh
-    gmsh.model.mesh.generate(dim=DIM)
-    gmsh.model.mesh.refine()
-    gmsh.model.mesh.refine()
-    gmsh.model.mesh.setOrder(order=ORDER)
+    msh.generate(dim=DIM)
+    msh.setOrder(order=ORDER)
     # += Write File
-
     gmsh.write("P_Branch_Contraction/gmsh_msh/SUB_RED" + test_name + ".msh")
     gmsh.finalize()
 
@@ -290,9 +327,9 @@ if __name__ == '__main__':
     test = [
         "28"
     ]
-    test_name = ["QUAD_XX_" + x for x in test]
+    test_name = ["HEX_XX_" + x for x in test]
     # += Cases
-    test_case = list(range(0, 1, 1))
+    test_case = list(range(0, len(test_name), 1))
     # test_case = list(range(0, 1, 1))
     # += Feed Main()
-    main(["28"], test_case)
+    main(test_name, test_case)
