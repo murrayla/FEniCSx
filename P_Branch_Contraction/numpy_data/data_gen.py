@@ -8,21 +8,32 @@
 
 # +==+==+ Setup
 # += Dependencies
+import csv
 import numpy as np
 import matplotlib.pyplot as plt
 # += Constants
 ITERATIONS = 19
-DATA_TYPE = ["disp", "eps", "sig"]
+DATA_TYPE = ["disp_x", "eps_xy", "sig_xy"]
+TEST_POINTS = (7, 5)
 
 # +==+==+==+
 # Process numpy data files:
 #   Input of label name
 #   Output processed data
 def process_data(test_name, d_t):
-    for test in test_name:
-        for it in range(0, ITERATIONS, 1):
-            file = "P_Branch_Contraction/numpy_data/" + d_t + "_x_SUB_REDQUAD_XX_" + test + "__10PctIter_" + str(it) + ".npy"
-            cur = np.load(file)
+    arg_array = np.zeros((TEST_POINTS[0], TEST_POINTS[1], len(test_name)))
+
+    for i, test in enumerate(test_name):
+        file = "P_Branch_Contraction/numpy_data/" + d_t + "_SUB_REDQUAD_XX_" + test + "__10PctIter.npy"
+        cur = np.load(file)
+        arg_array[:, :, i] = cur
+
+    test_col = [[name] for name in test_name]
+    for row in range(0, TEST_POINTS[1], 1):
+        with open("P_Branch_Contraction/csv_data/" + d_t + "_row_" + str(row) + "_.csv", 'w') as f:
+            writer = csv.writer(f, delimiter=',')
+            writer.writerow(test_col)
+            writer.writerows(arg_array[:, row, :]) 
     return None
 
 # +==+==+==+

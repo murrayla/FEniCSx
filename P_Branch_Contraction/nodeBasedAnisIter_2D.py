@@ -305,12 +305,12 @@ def main(test_name, elem_order, quad_order, ID):
                 points_on_proc = []
                 cell_candidates = geometry.compute_collisions_points(bb_tree, [xlo, ylo, 0])
                 colliding_cells = geometry.compute_colliding_cells(domain, cell_candidates,[xlo, ylo, 0])
-                disp_xy = disp.eval([xlo, ylo, 0], colliding_cells)
+                disp_xy = disp.eval([xlo, ylo, 0], colliding_cells[0])
                 x_u_data[n, m] = disp_xy[0]
                 y_u_data[n, m] = disp_xy[1]
-                sig_xy = sig.eval([xlo, ylo, 0], colliding_cells)
+                sig_xy = sig.eval([xlo, ylo, 0], colliding_cells[0])
                 xy_s_data[n, m] = sig_xy[1]
-                eps_xy = eps.eval([xlo, ylo, 0], colliding_cells)
+                eps_xy = eps.eval([xlo, ylo, 0], colliding_cells[0])
                 xy_e_data[n, m] = eps_xy[1]
 
         np.save("P_Branch_Contraction/numpy_data/disp_x_" + test_name + "_" + ID + ".npy", x_u_data)
