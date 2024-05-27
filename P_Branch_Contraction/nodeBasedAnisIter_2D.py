@@ -9,7 +9,7 @@
 # +==+==+==+
 # Setup
 # += Imports
-from dolfinx import io,  default_scalar_type
+from dolfinx import io,  default_scalar_type, geometry
 from dolfinx.fem import Function, FunctionSpace, dirichletbc, locate_dofs_topological, Expression, form
 from dolfinx.fem.petsc import NonlinearProblem, set_bc, assemble, create_matrix, create_vector, assemble_matrix, assemble_vector
 from dolfinx.mesh import locate_entities_boundary, meshtags
@@ -238,6 +238,7 @@ def main(test_name, elem_order, quad_order, ID):
     phase_con = np.linspace(DISPLACEMENT, -DISPLACEMENT, ITS*2)
     phase_exp = np.linspace(-DISPLACEMENT, 0, ITS)
     bc_u_iter = np.concatenate([phase_ext, phase_con, phase_exp])
+    bc_u_iter = [DISPLACEMENT]
     # += Export data
     Vu_sol, _ = W.sub(0).collapse() 
     disp = Function(Vu_sol) 
@@ -249,9 +250,12 @@ def main(test_name, elem_order, quad_order, ID):
     eps.name = "E - Green Strain"
     # test_name = "TESTING_ITERATION"
     # += Setup file writers
-    dis_file = io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_DISP.bp", disp, engine="BP4")
-    eps_file = io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_EPS.bp", eps, engine="BP4")
-    sig_file = io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_SIG.bp", sig, engine="BP4")
+    # dis_file = io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_DISP.bp", disp, engine="BP4")
+    # eps_file = io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_EPS.bp", eps, engine="BP4")
+    # sig_file = io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_SIG.bp", sig, engine="BP4")
+
+    # += Bounding box for cell searching
+    bb_tree = geometry.bb_tree(domain, domain.topology.dim)
 
     # +==+ Loop deformations
     for i, d in enumerate(bc_u_iter):
@@ -285,22 +289,44 @@ def main(test_name, elem_order, quad_order, ID):
         sig.interpolate(cauchy)
         eps.interpolate(epsilon)
 
-        np.save("P_Branch_Contraction/numpy_data/disp_x_" + test_name + "_" + ID + "_" + str(i) + ".npy", disp.x.array[dofsX])
-        np.save("P_Branch_Contraction/numpy_data/disp_y_" + test_name + "_" + ID + "_" + str(i) + ".npy", disp.x.array[dofsY])
-        np.save("P_Branch_Contraction/numpy_data/sig_x_" + test_name + "_" + ID + "_" + str(i) + ".npy", sig.x.array[dofsX])
-        np.save("P_Branch_Contraction/numpy_data/sig_y_" + test_name + "_" + ID + "_" + str(i) + ".npy", sig.x.array[dofsY])
-        np.save("P_Branch_Contraction/numpy_data/eps_x_" + test_name + "_" + ID + "_" + str(i) + ".npy", eps.x.array[dofsX])
-        np.save("P_Branch_Contraction/numpy_data/eps_y_" + test_name + "_" + ID + "_" + str(i) + ".npy", eps.x.array[dofsY])
+        TEST_POINTS = (7, 5)
+        x_locs = np.round([(x+1) * 0.125 for x in range(0, TEST_POINTS[0], 1)], 3)
+        y_locs = np.round([x * 0.2 + 0.1 for x in range(0, TEST_POINTS[1], 1)], 3)
+        x_u_data = np.zeros(TEST_POINTS)
+        y_u_data = np.zeros(TEST_POINTS)
+        xy_e_data = np.zeros(TEST_POINTS)
+        xy_s_data = np.zeros(TEST_POINTS)
+
+        for m, ylo in enumerate(y_locs):
+            for n, xlo in enumerate(x_locs):
+                # x0 = locate_entities_boundary(mesh=domain, dim=MESH_DIM-1, marker=lambda x: np.isclose(x[0], xlo, rtol=0.1, atol=0.1))
+                # y0 = locate_entities_boundary(mesh=domain, dim=MESH_DIM-1, marker=lambda x: np.isclose(x[1], ylo))
+                cells = []
+                points_on_proc = []
+                cell_candidates = geometry.compute_collisions_points(bb_tree, [xlo, ylo, 0])
+                colliding_cells = geometry.compute_colliding_cells(domain, cell_candidates,[xlo, ylo, 0])
+                disp_xy = disp.eval([xlo, ylo, 0], colliding_cells)
+                x_u_data[n, m] = disp_xy[0]
+                y_u_data[n, m] = disp_xy[1]
+                sig_xy = sig.eval([xlo, ylo, 0], colliding_cells)
+                xy_s_data[n, m] = sig_xy[1]
+                eps_xy = eps.eval([xlo, ylo, 0], colliding_cells)
+                xy_e_data[n, m] = eps_xy[1]
+
+        np.save("P_Branch_Contraction/numpy_data/disp_x_" + test_name + "_" + ID + ".npy", x_u_data)
+        np.save("P_Branch_Contraction/numpy_data/disp_y_" + test_name + "_" + ID + ".npy", y_u_data)
+        np.save("P_Branch_Contraction/numpy_data/sig_xy_" + test_name + "_" + ID + ".npy", xy_s_data)
+        np.save("P_Branch_Contraction/numpy_data/eps_xy_" + test_name + "_" + ID + ".npy", xy_e_data)
 
         # += Write files 
-        for j in range(1, 10, 1): dis_file.write(i*10 + j)
-        for j in range(1, 10, 1): eps_file.write(i*10 + j)
-        for j in range(1, 10, 1): sig_file.write(i*10 + j)
+        # for j in range(1, 10, 1): dis_file.write(i*10 + j)
+        # for j in range(1, 10, 1): eps_file.write(i*10 + j)
+        # for j in range(1, 10, 1): sig_file.write(i*10 + j)
 
     # += Close files
-    dis_file.close()
-    eps_file.close()
-    sig_file.close()
+    # dis_file.close()
+    # eps_file.close()
+    # sig_file.close()
     
 # +==+==+
 # Main check for script operation.
@@ -326,11 +352,12 @@ if __name__ == '__main__':
     count = 0
     # main(test_name[0], elem_order, quad_order, ID="_")
     for name in test_name:
-        try:
-            main(name, elem_order, quad_order, ID="_10PctIter")
-            count += 1
-        except:
-            count -= 1
-            continue
+        main(name, elem_order, quad_order, ID="_10PctIter")
+        # try:
+        #     main(name, elem_order, quad_order, ID="_10PctIter")
+        #     count += 1
+        # except:
+        #     count -= 1
+        #     continue
             
     print(" WE COMPLETED: {}".format(count))
