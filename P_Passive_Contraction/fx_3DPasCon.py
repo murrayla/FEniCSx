@@ -26,13 +26,23 @@ import os
 # += Parameters
 DIM = 3
 NULL = 0
+ZDISC = 5 
 PXLS = {"x": 11, "y": 11, "z": 50}
 CUBE = {"x": 1024, "y": 1024, "z": 80}
 ORDER = 2
 X, Y, Z = 0, 1, 2
 QUADRATURE = 4
 EL_TAGS = {0: 1e0, 1: 1e2, 2: 1e3, 3: 5e3, 4: 1e4, 5: 2e4}
-PY_TAGS = {0: 1e2, 1: 1e3, 2: 5e3, 3: 1e4, 4: 2e4, 5: 3e4, "x0": 1, "x1": 2}
+PY_TAGS = {0: 1e2, 1: 1e3, 2: 5e3, 3: 1e4, 4: 2e4, 5: 3e4}
+OBJ_TAGS = {
+    (0.0, 5632.0, 2000.0): [1, "x0_surface"], 
+    (11264.0, 5632.0, 2000.0): [2, "x1_surface"], 
+    (5632.0, 0.0, 2000.0): [3, "y0_surface"],
+    (5632.0, 11264.0, 2000.0): [4, "y1_surface"],
+    (5632.0, 5632.0, 0.0): [5, "z0_surface"],
+    (5632.0, 5632.0, 4000.0): [6, "z1_surface"],
+    (5632.0, 5632.0, 2000.0): [7, "volume"]
+}
 
 # +==+==+==+
 # fx_
@@ -56,6 +66,7 @@ def fx_(tnm, file, depth):
     Sos = FunctionSpace(mesh=domain, element=V2)
     Fos = FunctionSpace(mesh=domain, element=V1)
     Tes = FunctionSpace(mesh=domain, element=("CG", ORDER, (DIM, DIM)))
+    Dcs = FunctionSpace(mesh=domain, element=("DG", 0))
 
     # +==+ Function Variables
     # += Current
@@ -122,14 +133,13 @@ def fx_(tnm, file, depth):
         bc_UzX0 = dirichletbc(value=uzx0, dofs=zx0_dofs, V=W.sub(0).sub(Z))
         bc_UzX1 = dirichletbc(value=uzx1, dofs=zx1_dofs, V=W.sub(0).sub(Z))
         # += Assign
-        return [bc_UxX0, bc_UyX0, bc_UxX1, bc_UyX1], ft
+        return [bc_UxX0, bc_UxX1, bc_UyX0, bc_UyX1, bc_UzX0, bc_UzX1], ft
     
     # += Extract boundary conditions and facet tags
     bc, ft = boundary_conditions(domain, Mxs, Vx, Vy, DISPLACEMENT)
 
     # +==+ Subdomain Setup
-    V_1DG = FunctionSpace(domain, ("DG", 0))
-    def subdomain_assignments(domain, ct, V_1DG):
+    def subdomain_assignments(ct, V_1DG):
         # += Locate cells of interest
         str_myo = ct.find(GROUP_IDS["Straight"])
         inc_myo = ct.find(GROUP_IDS["Incline"])
@@ -153,7 +163,7 @@ def fx_(tnm, file, depth):
         return fibre_rot, fibre_val
     
     # += Define rotation and material value
-    fibre_rot, fibre_val = subdomain_assignments(domain, ct, V_1DG)
+    fibre_rot, fibre_val = subdomain_assignments(ct, Dcs)
 
     # +==+ Variational Problem Setup
     # += Test and Trial Parameters
@@ -364,44 +374,106 @@ def fx_(tnm, file, depth):
     return None
 
 # +==+==+==+
-# gmsh_cube:
-#   Input of test_name and required graph network.
-#   Output cube with refined generations.
-def gmsh_cube(tnm, msh, depth):
+# net_csv:
+#   Inputs: 
+#       tnm  | str | test name
+#   Outputs:
+#       np arrays of connectivity and centroid data
+def net_csv(tnm, depth):
+    depth += 1
+    print("\t" * depth + "+= Load geometry data...")
+    file_inc = os.path.dirname(os.path.abspath(__file__)) + "/_csv/" + tnm
+    # += Load centroid positions
+    print("\t" * depth + " ... Loading centroids")
+    with open(file_inc + "_CEN" + ".csv", newline='') as f:
+        reader = csv.reader(f)
+        cent_data = list(reader)
+        cent_data = [[float(y) for y in x] for x in cent_data]
+    # += Load connectivity matrix 
+    print("\t" * depth + " ... Loading connectivity")
+    with open(file_inc + "_CMA" + ".csv", newline='') as f:
+        reader = csv.reader(f)
+        cmat_data = list(reader)
+        cmat_data = [[int(float(y)) for y in x] for x in cmat_data]
+    return np.array(cent_data), np.array(cmat_data)
+
+# +==+==+==+
+# msh_:
+#   Inputs: 
+#       tnm  | str | test name
+#       msh  | bool | automation check
+#   Outputs:
+#       .msh file of mesh
+def msh_(tnm, msh, depth):
     depth += 1
     print("\t" * depth + "+= Generate Mesh: {}.msh".format(tnm))
 
-    # +==+==+
-    # Initialise and begin geometry
+    # +==+ Initialise and begin geometry
     gmsh.initialize()
     gmsh.model.add(tnm)
 
-    # += Check for auto generation
-    if msh:
-        # += Create cube
-        box = gmsh.model.occ.addBox(
-            x=0, y=0, z=0, 
-            dx=CUBE["x"]*PXLS["x"], dy=CUBE["y"]*PXLS["y"], dz=CUBE["z"]*PXLS["z"], 
-            tag=int(EL_TAGS[5])
-        )
-        EL_TAGS[5] += 1
-        gmsh.model.occ.synchronize()
-        # += Generate physical groups and label contraction sites
-        for i in range(0, 4, 1):
-            for _, j in gmsh.model.occ.get_entities(dim=i):
-                (x, y, z) = gmsh.model.occ.get_center_of_mass(dim=i, tag=j)
-                if np.all(np.isclose([x, y, z], [0, CUBE["y"]*PXLS["y"]/2, CUBE["z"]*PXLS["z"]/2])):
-                    gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS["x0"]), name="X_MIN")
-                elif np.all(np.isclose([x, y, z], [CUBE["x"]*PXLS["x"], CUBE["y"]*PXLS["y"]/2, CUBE["z"]*PXLS["z"]/2])):
-                    gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS["x1"]), name="X_MAX")
-                else:
-                    gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]))
+    # +==+ Create cube
+    box = gmsh.model.occ.addBox(
+        x=0, y=0, z=0, 
+        dx=CUBE["x"]*PXLS["x"], dy=CUBE["y"]*PXLS["y"], dz=CUBE["z"]*PXLS["z"], 
+        tag=int(EL_TAGS[5])
+    )
+    EL_TAGS[5] += 1
+    gmsh.model.occ.synchronize()
+    # += Generate physical groups and label contraction sites
+    for i in range(0, 4, 1):
+        for _, j in gmsh.model.occ.get_entities(dim=i):
+            (x, y, z) = gmsh.model.occ.get_center_of_mass(dim=i, tag=j)
+            try:
+                gmsh.model.add_physical_group(
+                    dim=i, tags=[j], tag=OBJ_TAGS[(x, y, z)][0], name=OBJ_TAGS[(x, y, z)][1]
+                )
+            except:
+                gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]))
                 PY_TAGS[i] += 1
+    gmsh.model.occ.synchronize()
+
+    # +==+ Load geometry data
+    np_cen, np_cma = net_csv(tnm, depth)
+
+    # +==+ Create zdisc faces
+    srf_tgs = []
+    for x, y, z in np_cen:
+        zc = gmsh.model.occ.addCircle(x=x, y=y, z=z, r=ZDISC*PXLS["z"], tag=int(EL_TAGS[1]), zAxis=[1,0,0])
+        zl = gmsh.model.occ.addCurveLoop(curveTags=[zc], tag=int(EL_TAGS[2]))
+        sc = gmsh.model.occ.addPlaneSurface(wireTags=[zl], tag=int(EL_TAGS[3]))
+        srf_tgs.append(sc)
         gmsh.model.occ.synchronize()
+        EL_TAGS[1] += 1
+        EL_TAGS[2] += 1
+        EL_TAGS[3] += 1
+        PY_TAGS[2] += 1
+        gmsh.model.add_physical_group(dim=2, tags=[sc], tag=int(PY_TAGS[2]), name="zd_" + str(int(x)) + str(int(y)) + str(int(z)))
+        gmsh.model.occ.synchronize()
+
+    # +==+ Create sarcomere cylinders
+    for i, row in enumerate(np_cma):
+        c = gmsh.model.occ.addThruSections(wireTags=[lop_tgs[start], lop_tgs[end]], tag=thr_tgs[e], makeSolid=True, makeRuled=True)
+            print(n)
+            curr.append(c)
+            zt.append(curr)
+            gmsh.model.occ.synchronize()
+            e += 1
+        if len(curr) > 1:
+            f2 = [(x[0][0], x[0][1]) for x in curr[1:]]
+            if len(f2) == 1:
+                f2 = curr[1]
+            print(curr[0], f2)
+            keep2fuse.append([curr[0], f2])
+            
+    # for k in range(0, len(keep2fuse), 1):
+    #     print(keep2fuse[k][0], keep2fuse[k][1])
+    #     gmsh.model.occ.fuse(keep2fuse[k][0], keep2fuse[k][1], removeObject=True, removeTool=True)
+    #     gmsh.model.occ.synchronize()
 
     # += Generate Mesh
     gmsh.model.occ.synchronize()
-    gmsh.model.mesh.generate(dim=DIM)
+    gmsh.model.mesh.generate(dim=2)
     gmsh.model.mesh.refine()
     gmsh.model.mesh.setOrder(order=ORDER)
 
@@ -421,7 +493,7 @@ def gmsh_cube(tnm, msh, depth):
 def main(tnm, msh, depth):
     depth += 1
     # += Mesh generation 
-    file = gmsh_cube(tnm, msh, depth)
+    file = msh_(tnm, msh, depth)
     # += Enter FEniCSx
     fx_(tnm, file, depth)
 
@@ -436,7 +508,7 @@ if __name__ == '__main__':
     # args = parser.parse_args()
     # tnm = args.test_name
     # msh = args.auto_mesh
-    tnm = "TEST"
+    tnm = "TESTSARC3MIDDLE"
     msh = True
     # += Run
     print("\t" * depth + "!! BEGIN TEST: " + tnm + " !!")
