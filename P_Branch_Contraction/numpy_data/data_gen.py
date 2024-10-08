@@ -53,7 +53,7 @@ if __name__ == '__main__':
     test = [
         "SINGLE_MIDDLE", "SINGLE_DOUBLE", "SINGLE_ACROSS", 
         "DOUBLE_ACROSS", "BRANCH_ACROSS", "BRANCH_MIDDLE", 
-        "TRANSFER_DOUBLE"
+        "TRANSFER_DOUBLE", "CYTOSOL"
     ]
     test_name = [x for x in test]
     # += Cases
