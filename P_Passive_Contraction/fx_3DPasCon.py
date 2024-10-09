@@ -16,6 +16,7 @@ from dolfinx.mesh import locate_entities_boundary, meshtags
 from petsc4py import PETSc
 from mpi4py import MPI
 import matplotlib.pyplot as plt
+import pandas as pd
 import numpy as np
 import argparse
 import gmsh
@@ -34,14 +35,13 @@ X, Y, Z = 0, 1, 2
 QUADRATURE = 4
 EL_TAGS = {0: 1e0, 1: 1e2, 2: 1e3, 3: 5e3, 4: 1e4, 5: 2e4}
 PY_TAGS = {0: 1e2, 1: 1e3, 2: 5e3, 3: 1e4, 4: 2e4, 5: 3e4}
-OBJ_TAGS = {
+SUR_OBJ_TAGS = {
     (0.0, 5632.0, 2000.0): [1, "x0_surface"], 
     (11264.0, 5632.0, 2000.0): [2, "x1_surface"], 
     (5632.0, 0.0, 2000.0): [3, "y0_surface"],
     (5632.0, 11264.0, 2000.0): [4, "y1_surface"],
     (5632.0, 5632.0, 0.0): [5, "z0_surface"],
     (5632.0, 5632.0, 4000.0): [6, "z1_surface"],
-    (5632.0, 5632.0, 2000.0): [7, "volume"]
 }
 
 # +==+==+==+
@@ -420,18 +420,6 @@ def msh_(tnm, msh, depth):
     )
     EL_TAGS[5] += 1
     gmsh.model.occ.synchronize()
-    # += Generate physical groups and label contraction sites
-    # for i in range(0, 4, 1):
-    #     for _, j in gmsh.model.occ.get_entities(dim=i):
-    #         (x, y, z) = gmsh.model.occ.get_center_of_mass(dim=i, tag=j)
-    #         try:
-    #             gmsh.model.add_physical_group(
-    #                 dim=i, tags=[j], tag=OBJ_TAGS[(x, y, z)][0], name=OBJ_TAGS[(x, y, z)][1]
-    #             )
-    #         except:
-    #             gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]))
-    #             PY_TAGS[i] += 1
-    # gmsh.model.occ.synchronize()
 
     # +==+ Load geometry data
     np_cen, np_cma = net_csv(tnm, depth)
@@ -461,8 +449,44 @@ def msh_(tnm, msh, depth):
                 EL_TAGS[4] += 1
                 gmsh.model.occ.synchronize()    
 
-    vol_tgs = gmsh.model.occ.get_entities(dim=DIM)
-    gmsh.model.occ.fragment([(DIM, vol_tgs[0][1])], [i for i in vol_tgs[1:]])
+    # +==+ Find overlaps and remove them
+    for i in range(0, DIM+1, 1):
+        tgs = gmsh.model.occ.get_entities(dim=i)
+        gmsh.model.occ.fragment([(i, tgs[0][1])], [j for j in tgs[1:]])
+        print(i)
+
+    # += Generate physical groups and label contraction sites
+    for i in range(0, DIM+1, 1):
+        _, tgs = zip(*gmsh.model.occ.get_entities(dim=i))
+        data = {
+            tgs[x]: [
+                gmsh.model.occ.get_mass(dim=i, tag=tgs[x]),
+                gmsh.model.occ.get_center_of_mass(dim=i, tag=tgs[x])
+            ] for x in range(0, len(tgs), 1)
+        }
+        df = pd.DataFrame(data).transpose().sort_values(by=[0], ascending=False)
+        for n, (j, row) in enumerate(df.iterrows()):
+            if i == DIM - 1:
+                try:
+                    gmsh.model.add_physical_group(
+                        dim=i, tags=[j], tag=SUR_OBJ_TAGS[row[1]][0], name=SUR_OBJ_TAGS[row[1]][1]
+                    )
+                except:
+                    gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]))
+                    PY_TAGS[i] += 1
+                continue
+            if i == DIM:
+                print(df)
+                if not(n):
+                    gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]), name="Cytosol")
+                else:
+                    gmsh.model.add_physical_group(
+                        dim=i, tags=[j], tag=int(PY_TAGS[i]), name="Sarc_" + str(j)
+                    )
+            else: 
+                gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]))
+            PY_TAGS[i] += 1
+        gmsh.model.occ.synchronize()
 
     print(gmsh.model.occ.get_entities(dim=DIM))
     for i in gmsh.model.occ.get_entities(dim=DIM):
