@@ -421,59 +421,57 @@ def msh_(tnm, msh, depth):
     EL_TAGS[5] += 1
     gmsh.model.occ.synchronize()
     # += Generate physical groups and label contraction sites
-    for i in range(0, 4, 1):
-        for _, j in gmsh.model.occ.get_entities(dim=i):
-            (x, y, z) = gmsh.model.occ.get_center_of_mass(dim=i, tag=j)
-            try:
-                gmsh.model.add_physical_group(
-                    dim=i, tags=[j], tag=OBJ_TAGS[(x, y, z)][0], name=OBJ_TAGS[(x, y, z)][1]
-                )
-            except:
-                gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]))
-                PY_TAGS[i] += 1
-    gmsh.model.occ.synchronize()
+    # for i in range(0, 4, 1):
+    #     for _, j in gmsh.model.occ.get_entities(dim=i):
+    #         (x, y, z) = gmsh.model.occ.get_center_of_mass(dim=i, tag=j)
+    #         try:
+    #             gmsh.model.add_physical_group(
+    #                 dim=i, tags=[j], tag=OBJ_TAGS[(x, y, z)][0], name=OBJ_TAGS[(x, y, z)][1]
+    #             )
+    #         except:
+    #             gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]))
+    #             PY_TAGS[i] += 1
+    # gmsh.model.occ.synchronize()
 
     # +==+ Load geometry data
     np_cen, np_cma = net_csv(tnm, depth)
 
     # +==+ Create zdisc faces
-    srf_tgs = []
+    srf_tgs, wir_tgs = [], []
     for x, y, z in np_cen:
         zc = gmsh.model.occ.addCircle(x=x, y=y, z=z, r=ZDISC*PXLS["z"], tag=int(EL_TAGS[1]), zAxis=[1,0,0])
         zl = gmsh.model.occ.addCurveLoop(curveTags=[zc], tag=int(EL_TAGS[2]))
         sc = gmsh.model.occ.addPlaneSurface(wireTags=[zl], tag=int(EL_TAGS[3]))
         srf_tgs.append(sc)
+        wir_tgs.append(zl)
         gmsh.model.occ.synchronize()
         EL_TAGS[1] += 1
         EL_TAGS[2] += 1
         EL_TAGS[3] += 1
         PY_TAGS[2] += 1
-        gmsh.model.add_physical_group(dim=2, tags=[sc], tag=int(PY_TAGS[2]), name="zd_" + str(int(x)) + str(int(y)) + str(int(z)))
+        # gmsh.model.add_physical_group(dim=2, tags=[sc], tag=int(PY_TAGS[2]), name="zd_" + str(int(x)) + str(int(y)) + str(int(z)))
         gmsh.model.occ.synchronize()
 
     # +==+ Create sarcomere cylinders
     for i, row in enumerate(np_cma):
-        c = gmsh.model.occ.addThruSections(wireTags=[lop_tgs[start], lop_tgs[end]], tag=thr_tgs[e], makeSolid=True, makeRuled=True)
-            print(n)
-            curr.append(c)
-            zt.append(curr)
-            gmsh.model.occ.synchronize()
-            e += 1
-        if len(curr) > 1:
-            f2 = [(x[0][0], x[0][1]) for x in curr[1:]]
-            if len(f2) == 1:
-                f2 = curr[1]
-            print(curr[0], f2)
-            keep2fuse.append([curr[0], f2])
-            
-    # for k in range(0, len(keep2fuse), 1):
-    #     print(keep2fuse[k][0], keep2fuse[k][1])
-    #     gmsh.model.occ.fuse(keep2fuse[k][0], keep2fuse[k][1], removeObject=True, removeTool=True)
-    #     gmsh.model.occ.synchronize()
+        row = row[i:]
+        for n, j in enumerate(row):
+            if j:
+                c = gmsh.model.occ.addThruSections(wireTags=[wir_tgs[i], wir_tgs[n+i]], tag=int(EL_TAGS[4]), makeSolid=True, makeRuled=False)
+                EL_TAGS[4] += 1
+                gmsh.model.occ.synchronize()    
+
+    vol_tgs = gmsh.model.occ.get_entities(dim=DIM)
+    gmsh.model.occ.fragment([(DIM, vol_tgs[0][1])], [i for i in vol_tgs[1:]])
+
+    print(gmsh.model.occ.get_entities(dim=DIM))
+    for i in gmsh.model.occ.get_entities(dim=DIM):
+        print(i)
+        print(gmsh.model.occ.get_mass(dim=DIM, tag=i[1]))
 
     # += Generate Mesh
     gmsh.model.occ.synchronize()
-    gmsh.model.mesh.generate(dim=2)
+    gmsh.model.mesh.generate(dim=DIM)
     gmsh.model.mesh.refine()
     gmsh.model.mesh.setOrder(order=ORDER)
 
