@@ -408,6 +408,10 @@ def msh_(tnm, msh, depth):
     depth += 1
     print("\t" * depth + "+= Generate Mesh: {}.msh".format(tnm))
 
+    # += Tag Storage
+    TG_S = {DIM-1: [], DIM: []}
+    TG_C = {DIM-1: [], DIM: []}
+
     # +==+ Initialise and begin geometry
     gmsh.initialize()
     gmsh.model.add(tnm)
@@ -430,33 +434,35 @@ def msh_(tnm, msh, depth):
         zc = gmsh.model.occ.addCircle(x=x, y=y, z=z, r=ZDISC*PXLS["z"], tag=int(EL_TAGS[1]), zAxis=[1,0,0])
         zl = gmsh.model.occ.addCurveLoop(curveTags=[zc], tag=int(EL_TAGS[2]))
         sc = gmsh.model.occ.addPlaneSurface(wireTags=[zl], tag=int(EL_TAGS[3]))
+        gmsh.model.occ.synchronize()
         srf_tgs.append(sc)
         wir_tgs.append(zl)
-        gmsh.model.occ.synchronize()
         EL_TAGS[1] += 1
         EL_TAGS[2] += 1
         EL_TAGS[3] += 1
         PY_TAGS[2] += 1
-        # gmsh.model.add_physical_group(dim=2, tags=[sc], tag=int(PY_TAGS[2]), name="zd_" + str(int(x)) + str(int(y)) + str(int(z)))
-        gmsh.model.occ.synchronize()
 
     # +==+ Create sarcomere cylinders
     for i, row in enumerate(np_cma):
         row = row[i:]
         for n, j in enumerate(row):
+            # += Find connections and create through sections
             if j:
-                c = gmsh.model.occ.addThruSections(wireTags=[wir_tgs[i], wir_tgs[n+i]], tag=int(EL_TAGS[4]), makeSolid=True, makeRuled=False)
+                gmsh.model.occ.addThruSections(
+                    wireTags=[wir_tgs[i], wir_tgs[n+i]], 
+                    tag=int(EL_TAGS[4]), makeSolid=True, makeRuled=False
+                )
+                gmsh.model.occ.synchronize()   
                 EL_TAGS[4] += 1
-                gmsh.model.occ.synchronize()    
 
     # +==+ Find overlaps and remove them
     for i in range(0, DIM+1, 1):
         tgs = gmsh.model.occ.get_entities(dim=i)
         gmsh.model.occ.fragment([(i, tgs[0][1])], [j for j in tgs[1:]])
-        print(i)
 
-    # += Generate physical groups and label contraction sites
+    # +==+ Generate physical groups
     for i in range(0, DIM+1, 1):
+        # += Generate mass, com and tag data
         _, tgs = zip(*gmsh.model.occ.get_entities(dim=i))
         data = {
             tgs[x]: [
@@ -464,42 +470,63 @@ def msh_(tnm, msh, depth):
                 gmsh.model.occ.get_center_of_mass(dim=i, tag=tgs[x])
             ] for x in range(0, len(tgs), 1)
         }
+        # += Dataframe for iteration
         df = pd.DataFrame(data).transpose().sort_values(by=[0], ascending=False)
+        # += Find overlaping surfaces from through sections and remove them
+        if i == 2:
+            _drop = []
+            for _j, tg in enumerate(tgs):
+                # += Remove based on centre of mass {add mass too if need more specific}
+                for _tg in tgs[_j:]:
+                    _obj_com = [round(x, 0) for x in [*gmsh.model.occ.get_center_of_mass(dim=i, tag=tg)]]
+                    _too_com = [round(x, 0) for x in [*gmsh.model.occ.get_center_of_mass(dim=i, tag=_tg)]]
+                    if (_obj_com == _too_com) and (tg != _tg):
+                        _drop.append([tg, _tg])
+                        df = df.drop([_tg])
+        # += Generate physical groups 
         for n, (j, row) in enumerate(df.iterrows()):
+            # += If of Dimension 2 find the Z-Discs from centroid data
             if i == DIM - 1:
+                # += Check if it is a border region
                 try:
                     gmsh.model.add_physical_group(
                         dim=i, tags=[j], tag=SUR_OBJ_TAGS[row[1]][0], name=SUR_OBJ_TAGS[row[1]][1]
                     )
                 except:
-                    gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]))
+                    # += Determine if it is a Z-Disc
+                    cen = np.array([round(x, 0) for x in [*gmsh.model.occ.get_center_of_mass(dim=i, tag=j)]])
+                    if np.any([np.all(x) for x in np.isclose(cen, np_cen)]):
+                        # print(cen)
+                        gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]), name="Disc_" + str(j))
+                        PY_TAGS[i] += 1
+                        continue
+                    # += Or simply another A/I-Band boundary
+                    gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]), name="Band_" + str(j))
                     PY_TAGS[i] += 1
                 continue
+            # += For Dimension 3, determine if sarcomere or cytosol
             if i == DIM:
-                print(df)
+                # += Cytosol determined as being the largest Mass, per previous ordering of DataFrame
                 if not(n):
                     gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]), name="Cytosol")
+                # += Otherwise its a Sarcomere
                 else:
                     gmsh.model.add_physical_group(
                         dim=i, tags=[j], tag=int(PY_TAGS[i]), name="Sarc_" + str(j)
                     )
+            # += Any other region can be arbitrarily labeled 
             else: 
                 gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]))
             PY_TAGS[i] += 1
         gmsh.model.occ.synchronize()
 
-    print(gmsh.model.occ.get_entities(dim=DIM))
-    for i in gmsh.model.occ.get_entities(dim=DIM):
-        print(i)
-        print(gmsh.model.occ.get_mass(dim=DIM, tag=i[1]))
-
-    # += Generate Mesh
+    # +==+ Generate Mesh
     gmsh.model.occ.synchronize()
     gmsh.model.mesh.generate(dim=DIM)
     gmsh.model.mesh.refine()
     gmsh.model.mesh.setOrder(order=ORDER)
 
-    # += Write File
+    # +==+ Write File
     file = os.path.dirname(os.path.abspath(__file__)) + "/_msh/" + tnm + ".msh"
     gmsh.write(file)
     gmsh.finalize()
