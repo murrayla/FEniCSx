@@ -48,9 +48,12 @@ SUR_OBJ_TAGS = {
 # fx_
 #   Inputs: 
 #       tnm  | str | test name
+#       file | str | file name
+#       tg_c | dict | cytosol physical element data
+#       tg_S | dict | sarcomere physical element data
 #   Outputs:
 #       .bp folder of deformation
-def fx_(tnm, file, depth):
+def fx_(tnm, file, tg_c, tg_s, depth):
     depth += 1
 
     # +==+ Domain Setup
@@ -374,6 +377,19 @@ def fx_(tnm, file, depth):
     return None
 
 # +==+==+==+
+# vec_angle:
+#   Input three nodes
+#   Output angle between vectors
+def vec_angle(root, n_1, n_2, depth):
+    depth += 1
+    v1, v2 = (n_1 - root), (n_2 - root)
+    mag_v1, mag_v2 = np.linalg.norm(v1), np.linalg.norm(v2)
+    angle = np.arccos(
+        np.dot(v1.T, v2.T) / (mag_v1 * mag_v2)
+    )
+    return angle
+
+# +==+==+==+
 # net_csv:
 #   Inputs: 
 #       tnm  | str | test name
@@ -383,6 +399,7 @@ def net_csv(tnm, depth):
     depth += 1
     print("\t" * depth + "+= Load geometry data...")
     file_inc = os.path.dirname(os.path.abspath(__file__)) + "/_csv/" + tnm
+
     # += Load centroid positions
     print("\t" * depth + " ... Loading centroids")
     with open(file_inc + "_CEN" + ".csv", newline='') as f:
@@ -404,12 +421,14 @@ def net_csv(tnm, depth):
 #       msh  | bool | automation check
 #   Outputs:
 #       .msh file of mesh
+#       tg_c | dict | cytosol physical element data
+#       tg_S | dict | sarcomere physical element data
 def msh_(tnm, msh, depth):
     depth += 1
     print("\t" * depth + "+= Generate Mesh: {}.msh".format(tnm))
 
     # += Tag Storage
-    TG_S = {DIM-1: [], DIM: []}
+    TG_S = {DIM-1: [], DIM: {"tag": [], "angles": []}}
     TG_C = {DIM-1: [], DIM: []}
 
     # +==+ Initialise and begin geometry
@@ -443,11 +462,30 @@ def msh_(tnm, msh, depth):
         PY_TAGS[2] += 1
 
     # +==+ Create sarcomere cylinders
+    angles = []
     for i, row in enumerate(np_cma):
         row = row[i:]
         for n, j in enumerate(row):
             # += Find connections and create through sections
             if j:
+                # += Determine Azimuth and Elevation
+                bgn, end = np_cen[i], np_cen[n+i]
+                ani_vec = end-bgn
+                origin = np.array([0, 0, 0])
+                vector = np.array([1, 0, 0])
+                # += Reduce to 0.0 if the resultant angle is nan
+                axim = vec_angle(
+                    origin[:2], vector[:2], ani_vec[:2], depth
+                ) if abs(vec_angle(
+                    origin[:2], vector[:2], ani_vec[:2], depth
+                )) > 0 else 0.0
+                elev = vec_angle(
+                    origin[1:], vector[1:], ani_vec[1:], depth
+                )  if abs(vec_angle(
+                    origin[1:], vector[1:], ani_vec[1:], depth
+                )) > 0 else 0.0
+                TG_S[DIM]["angles"].append([axim, elev])
+                # += Generate section
                 gmsh.model.occ.addThruSections(
                     wireTags=[wir_tgs[i], wir_tgs[n+i]], 
                     tag=int(EL_TAGS[4]), makeSolid=True, makeRuled=False
@@ -492,13 +530,14 @@ def msh_(tnm, msh, depth):
                     gmsh.model.add_physical_group(
                         dim=i, tags=[j], tag=SUR_OBJ_TAGS[row[1]][0], name=SUR_OBJ_TAGS[row[1]][1]
                     )
+                    TG_C[DIM-1].append(SUR_OBJ_TAGS[row[1]][0])
                 except:
                     # += Determine if it is a Z-Disc
                     cen = np.array([round(x, 0) for x in [*gmsh.model.occ.get_center_of_mass(dim=i, tag=j)]])
                     if np.any([np.all(x) for x in np.isclose(cen, np_cen)]):
-                        # print(cen)
                         gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]), name="Disc_" + str(j))
                         PY_TAGS[i] += 1
+                        TG_S[DIM-1].append(int(PY_TAGS[i]))
                         continue
                     # += Or simply another A/I-Band boundary
                     gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]), name="Band_" + str(j))
@@ -509,11 +548,13 @@ def msh_(tnm, msh, depth):
                 # += Cytosol determined as being the largest Mass, per previous ordering of DataFrame
                 if not(n):
                     gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]), name="Cytosol")
+                    TG_C[DIM].append(int(PY_TAGS[i]))
                 # += Otherwise its a Sarcomere
                 else:
                     gmsh.model.add_physical_group(
                         dim=i, tags=[j], tag=int(PY_TAGS[i]), name="Sarc_" + str(j)
                     )
+                    TG_S[DIM]["tag"].append(int(PY_TAGS[i]))
             # += Any other region can be arbitrarily labeled 
             else: 
                 gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]))
@@ -530,7 +571,7 @@ def msh_(tnm, msh, depth):
     file = os.path.dirname(os.path.abspath(__file__)) + "/_msh/" + tnm + ".msh"
     gmsh.write(file)
     gmsh.finalize()
-    return file
+    return file, TG_S, TG_C
 
 # +==+==+==+
 # main
@@ -542,9 +583,10 @@ def msh_(tnm, msh, depth):
 def main(tnm, msh, depth):
     depth += 1
     # += Mesh generation 
-    file = msh_(tnm, msh, depth)
+    file, tg_s, tg_c = msh_(tnm, msh, depth)
+    print(tg_c, tg_s)
     # += Enter FEniCSx
-    fx_(tnm, file, depth)
+    fx_(tnm, file, tg_c, tg_s, depth)
 
 # +==+==+ Main Check
 if __name__ == '__main__':
