@@ -26,23 +26,25 @@ import os
 
 # += Parameters
 DIM = 3
-NULL = 0
+I_0 = 0
+F_0 = 0.0 
 ZDISC = 5 
+ORDER = 2
+QUADRATURE = 4
+X, Y, Z = 0, 1, 2
 PXLS = {"x": 11, "y": 11, "z": 50}
 CUBE = {"x": 1024, "y": 1024, "z": 80}
-ORDER = 2
-X, Y, Z = 0, 1, 2
-QUADRATURE = 4
+SURF_NAMES = ["x0", "x1", "y0", "y1", "z0", "z1"]
+EDGE = [PXLS[d]*CUBE[d] for d in ["x", "y", "z"]]
+SUR_OBJ_TAGS = dict(zip(SURF_NAMES, list(range(1, 7, 1))))
 EL_TAGS = {0: 1e0, 1: 1e2, 2: 1e3, 3: 5e3, 4: 1e4, 5: 2e4}
 PY_TAGS = {0: 1e2, 1: 1e3, 2: 5e3, 3: 1e4, 4: 2e4, 5: 3e4}
-SUR_OBJ_TAGS = {
-    (0.0, 5632.0, 2000.0): [1, "x0_surface"], 
-    (11264.0, 5632.0, 2000.0): [2, "x1_surface"], 
-    (5632.0, 0.0, 2000.0): [3, "y0_surface"],
-    (5632.0, 11264.0, 2000.0): [4, "y1_surface"],
-    (5632.0, 5632.0, 0.0): [5, "z0_surface"],
-    (5632.0, 5632.0, 4000.0): [6, "z1_surface"],
-}
+LOCS_COM = [
+    (F_0, EDGE[1]/2, EDGE[2]/2), (EDGE[0], EDGE[1]/2, EDGE[2]/2), 
+    (EDGE[0]/2, F_0, EDGE[2]/2), (EDGE[0]/2, EDGE[1], EDGE[2]/2), 
+    (EDGE[0]/2, EDGE[1]/2, F_0), (EDGE[0]/2, EDGE[1]/2, EDGE[2]) 
+]
+SUR_OBJ_ASSIGN = dict(zip(LOCS_COM, [[n+1, name] for n, name in enumerate(SURF_NAMES)]))
 
 # +==+==+==+
 # fx_
@@ -59,7 +61,7 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # +==+ Domain Setup
     print("\t" * depth + "+= Generate Mesh")
     # += Load mesh data
-    domain, ct, _ = io.gmshio.read_from_msh(filename=file, comm=MPI.COMM_WORLD, rank=0, gdim=DIM)
+    domain, ct, ft = io.gmshio.read_from_msh(filename=file, comm=MPI.COMM_WORLD, rank=0, gdim=DIM)
     # += Create vector spaces
     V2 = ufl.VectorElement(family="CG", cell=domain.ufl_cell(), degree=ORDER)
     V1 = ufl.FiniteElement(family="CG", cell=domain.ufl_cell(), degree=ORDER-1)  
@@ -100,12 +102,12 @@ def fx_(tnm, file, tg_c, tg_s, depth):
         mfacets = np.hstack([xx0_ft, xx1_ft, yx0_ft, yx1_ft, zx0_ft, zx1_ft])
         # += Assign boundaries IDs and sort
         mvalues = np.hstack([
-            np.full_like(xx0_ft, PY_TAGS["x0"]), 
-            np.full_like(xx1_ft, PY_TAGS["x1"]), 
-            np.full_like(yx0_ft, PY_TAGS["x0"]),
-            np.full_like(yx1_ft, PY_TAGS["x1"]), 
-            np.full_like(zx0_ft, PY_TAGS["x0"]),
-            np.full_like(zx1_ft, PY_TAGS["x1"]), 
+            np.full_like(xx0_ft, SUR_OBJ_TAGS["x0"]), 
+            np.full_like(xx1_ft, SUR_OBJ_TAGS["x1"]), 
+            np.full_like(yx0_ft, SUR_OBJ_TAGS["x0"]),
+            np.full_like(yx1_ft, SUR_OBJ_TAGS["x1"]), 
+            np.full_like(zx0_ft, SUR_OBJ_TAGS["x0"]),
+            np.full_like(zx1_ft, SUR_OBJ_TAGS["x1"]), 
         ])
         sfacets = np.argsort(mfacets)
         ft = meshtags(mesh=domain, dim=fdim, entities=mfacets[sfacets], values=mvalues[sfacets])
@@ -124,10 +126,10 @@ def fx_(tnm, file, tg_c, tg_s, depth):
         )
         uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
         uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-du)))
-        uyx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(NULL)))
-        uyx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(NULL)))
-        uzx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(NULL)))
-        uzx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(NULL)))
+        uyx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(I_0)))
+        uyx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(I_0)))
+        uzx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(I_0)))
+        uzx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(I_0)))
         # += Create Dirichlet over subdomains
         bc_UxX0 = dirichletbc(value=uxx0, dofs=xx0_dofs, V=W.sub(0).sub(X))
         bc_UxX1 = dirichletbc(value=uxx1, dofs=xx1_dofs, V=W.sub(0).sub(X))
@@ -139,7 +141,7 @@ def fx_(tnm, file, tg_c, tg_s, depth):
         return [bc_UxX0, bc_UxX1, bc_UyX0, bc_UyX1, bc_UzX0, bc_UzX1], ft
     
     # += Extract boundary conditions and facet tags
-    bc, ft = boundary_conditions(domain, Mxs, Vx, Vy, DISPLACEMENT)
+    bc, ft = boundary_conditions(domain, Mxs, Vx, Vy, EDGE[0] * 0.075)
 
     # +==+ Subdomain Setup
     def subdomain_assignments(ct, V_1DG):
@@ -152,7 +154,7 @@ def fx_(tnm, file, tg_c, tg_s, depth):
         fibre_rot, fibre_val = Function(V_1DG), Function(V_1DG)
         # += Conditionally assign rotation and material value
         if len(str_myo):
-            fibre_rot.x.array[str_myo] = np.full_like(str_myo, NULL, dtype=default_scalar_type)
+            fibre_rot.x.array[str_myo] = np.full_like(str_myo, I_0, dtype=default_scalar_type)
             fibre_val.x.array[str_myo] = np.full_like(str_myo, MATERIAL_CONSTANTS[1], dtype=default_scalar_type)
         if len(inc_myo):
             fibre_rot.x.array[inc_myo] = np.full_like(inc_myo, ROT, dtype=default_scalar_type)
@@ -161,7 +163,7 @@ def fx_(tnm, file, tg_c, tg_s, depth):
             fibre_rot.x.array[dec_myo] = np.full_like(dec_myo, -ROT, dtype=default_scalar_type)
             fibre_val.x.array[dec_myo] = np.full_like(dec_myo, MATERIAL_CONSTANTS[1], dtype=default_scalar_type)
         if len(cytosol):
-            fibre_rot.x.array[cytosol] = np.full_like(cytosol, NULL, dtype=default_scalar_type)
+            fibre_rot.x.array[cytosol] = np.full_like(cytosol, I_0, dtype=default_scalar_type)
             fibre_val.x.array[cytosol] = np.full_like(cytosol, 0.5, dtype=default_scalar_type)
         return fibre_rot, fibre_val
     
