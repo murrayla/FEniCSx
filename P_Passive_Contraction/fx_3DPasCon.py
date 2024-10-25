@@ -159,7 +159,6 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # +==+ Variational Problem Setup
     # += Test and Trial Parameters
     u, p = ufl.split(mx)
-    print("I love my girlfriend sarah") 
     v, q = ufl.TestFunctions(Mxs)
     
     # += Coordinate values
