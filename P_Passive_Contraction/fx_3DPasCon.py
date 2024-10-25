@@ -10,12 +10,11 @@
 # +==+==+==+
 # Setup
 # += Imports
-from dolfinx import io,  default_scalar_type, geometry
-from dolfinx.fem import Function, FunctionSpace, dirichletbc, locate_dofs_topological, Expression, form
-from dolfinx.mesh import locate_entities_boundary, meshtags
-from petsc4py import PETSc
+from dolfinx import io,  default_scalar_type
+from dolfinx.fem import Function, FunctionSpace, dirichletbc, locate_dofs_topological
+from dolfinx.fem.petsc import NonlinearProblem
+from dolfinx.nls.petsc import NewtonSolver
 from mpi4py import MPI
-import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import argparse
@@ -30,10 +29,13 @@ I_0 = 0
 F_0 = 0.0 
 ZDISC = 5 
 ORDER = 2
+LAMBDA = 0.14
 QUADRATURE = 4
 X, Y, Z = 0, 1, 2
-CONSTIT_CYT = [0.5]
-CONSTIT_MYO = [1, 1, 0.5, 0.5]
+# CONSTIT_CYT = [0.5]
+CONSTIT_CYT = [1]
+# CONSTIT_MYO = [1, 1, 0.5, 0.5]
+CONSTIT_MYO = [1, 1, 1, 1]
 PXLS = {"x": 11, "y": 11, "z": 50}
 CUBE = {"x": 1024, "y": 1024, "z": 80}
 SURF_NAMES = ["x0", "x1", "y0", "y1", "z0", "z1"]
@@ -57,18 +59,16 @@ SUR_OBJ_ASSIGN = dict(zip(LOCS_COM, [[n+1, name] for n, name in enumerate(SURF_N
 #       du | float | displacement value
 #   Outputs:
 #       numpy array of boudnary condition assignment data
-def dir_bc(mix_vs, Vx, Vy, Vz, ft, du, depth):
-    depth += 1
-    print("\t" * depth + "+= Assign Boundary Conditions")
+def dir_bc(mix_vs, Vx, Vy, Vz, ft, du):
 
     # +==+ Locate subdomain dofs
     xx0_dofs, xx1_dofs, yx0_dofs, yx1_dofs, zx0_dofs, zx1_dofs = (
-        locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_ASSIGN["x0"])),
-        locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_ASSIGN["x1"])),
-        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_ASSIGN["x0"])),
-        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_ASSIGN["x1"])),
-        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_ASSIGN["x0"])),
-        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_ASSIGN["x1"])),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
     )
 
     # +==+ Interpolate 
@@ -76,7 +76,7 @@ def dir_bc(mix_vs, Vx, Vy, Vz, ft, du, depth):
         Function(Vx), Function(Vx), Function(Vy), Function(Vy), Function(Vz), Function(Vz)
     )
     uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
-    uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-du)))
+    uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
     uyx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
     uyx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
     uzx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
@@ -91,6 +91,7 @@ def dir_bc(mix_vs, Vx, Vy, Vz, ft, du, depth):
     bc_UzX1 = dirichletbc(value=uzx1, dofs=zx1_dofs, V=mix_vs.sub(0).sub(Z))
     # += Assign
     bc = [bc_UxX0, bc_UxX1, bc_UyX0, bc_UyX1, bc_UzX0, bc_UzX1]
+    # bc = [bc_UxX0, bc_UxX1, bc_UyX0, bc_UyX1]
 
     return bc
 
@@ -110,6 +111,7 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     print("\t" * depth + "+= Generate Mesh")
     # += Load mesh data
     domain, ct, ft = io.gmshio.read_from_msh(filename=file, comm=MPI.COMM_WORLD, rank=0, gdim=DIM)
+    print("\t" * depth + "+= Setup Vector Space ")
     # += Create vector spaces
     V2 = ufl.VectorElement(family="CG", cell=domain.ufl_cell(), degree=ORDER)
     V1 = ufl.FiniteElement(family="CG", cell=domain.ufl_cell(), degree=ORDER-1)  
@@ -134,13 +136,15 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     V, _ = Mxs.sub(0).collapse()
     Vx, dofsX = V.sub(X).collapse()
     Vy, dofsY = V.sub(Y).collapse()
+    Vz, dofsZ = V.sub(Z).collapse()
     
     # += Extract boundary conditions and facet tags
-    bc = dir_bc(domain, Mxs, Vx, Vy, ft, EDGE[0] * 0.075)
+    print("\t" * depth + "+= Assign Boundary Conditions")
+    bc = dir_bc(Mxs, Vx, Vy, Vz, ft, EDGE[0] * LAMBDA)
     
     # += Define rotation and material value
     # += Create 1-DOF space for assignment
-    print("\t" * depth + "+= Assign Boundary Conditions")
+    print("\t" * depth + "+= Assign Fibre Directions")
     fbr_azi, fbr_elv, fbr_con = Function(Dcs), Function(Dcs), Function(Dcs)
     cyt_tgs = ct.find(tg_c[DIM][0])
     fbr_azi.x.array[cyt_tgs] = np.full_like(cyt_tgs, I_0, dtype=default_scalar_type)
@@ -154,7 +158,8 @@ def fx_(tnm, file, tg_c, tg_s, depth):
 
     # +==+ Variational Problem Setup
     # += Test and Trial Parameters
-    u, p = ufl.split(Mxs)
+    u, p = ufl.split(mx)
+    print("I love my girlfriend sarah") 
     v, q = ufl.TestFunctions(Mxs)
     
     # += Coordinate values
@@ -165,13 +170,16 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # += Curvilinear mapping dependent on subdomain values
     Push = ufl.as_matrix([
         [ufl.cos(fbr_azi), -ufl.sin(fbr_azi), 0],
-        [ufl.sin(fbr_azi), ufl.cos(fbr_azi), 0]
+        [ufl.sin(fbr_azi), ufl.cos(fbr_azi), 0],
         [0, 0, 1]
-    ]) * ufl.as_matrix([
-        [1, 0, 0],
-        [0, ufl.cos(fbr_elv), -ufl.sin(fbr_elv)],
-        [0, ufl.sin(fbr_elv), ufl.cos(fbr_elv)]
     ])
+    
+    # * ufl.as_matrix([
+    #     [1, 0, 0],
+    #     [0, ufl.cos(fbr_elv), -ufl.sin(fbr_elv)],
+    #     [0, ufl.sin(fbr_elv), ufl.cos(fbr_elv)]
+    # ])
+
     # += Subdomain dependent rotations of displacement and coordinates
     x_nu = ufl.inv(Push) * x
     u_nu = ufl.inv(Push) * u
@@ -201,7 +209,7 @@ def fx_(tnm, file, tg_c, tg_s, depth):
         CONSTIT_MYO[3] * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
     )
     piola = CONSTIT_MYO[0]/4 * ufl.exp(Q) * ufl.as_matrix([
-        [4*fbr_con*E[0,0], *E[0,0], 2*CONSTIT_MYO[3]*(E[1,0] + E[0,1]), 2*CONSTIT_MYO[3]*(E[2,0] + E[0,2])],
+        [4*fbr_con*E[0,0], 2*CONSTIT_MYO[3]*(E[1,0] + E[0,1]), 2*CONSTIT_MYO[3]*(E[2,0] + E[0,2])],
         [2*CONSTIT_MYO[3]*(E[0,1] + E[1,0]), 4*CONSTIT_MYO[2]*E[1,1], 2*CONSTIT_MYO[2]*(E[2,1] + E[1,2])],
         [2*CONSTIT_MYO[3]*(E[0,2] + E[2,0]), 2*CONSTIT_MYO[2]*(E[1,2] + E[2,1]), 4*CONSTIT_MYO[3]*E[2,2]],
     ]) - p * Z_un
@@ -215,155 +223,117 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # += Residual equation
     R = term * dx + q * (J - 1) * dx
 
-    # +==+ Setup stress output
-    def cauchy_tensor(u, p, x, r):
-        # += Tensor Indices
-        i, j = ufl.indices(2)
-        # += Curvilinear Mapping
-        Push = ufl.as_matrix([
-            [ufl.cos(r), -ufl.sin(r)],
-            [ufl.sin(r), ufl.cos(r)]
-        ])
-        x_nu = ufl.inv(Push) * x
-        u_nu = ufl.inv(Push) * u
-        nu = ufl.inv(Push) * (x + u_nu)
-        # += Metric Tensors
-        Z_un = ufl.grad(x_nu).T * ufl.grad(x_nu)
-        Z_co = ufl.grad(nu).T * ufl.grad(nu)
-        # += Kinematics
-        I = ufl.variable(ufl.Identity(MESH_DIM))
-        F = ufl.as_tensor(I[i, j] + ufl.grad(u)[i, j], [i, j]) * Push
-        E = ufl.variable(ufl.as_tensor((0.5*(Z_co[i,j] - Z_un[i,j])), [i, j]))
-        J = ufl.variable(ufl.det(F))
-        # += Material Setup | Guccione
-        Q = (
-            fbr_con * E[0,0]**2 + 
-            CONSTIT_MYO[2] * (E[1,1]**2) + 
-            CONSTIT_MYO[3] * (2*E[0,1]*E[1,0])
-        )
-        piola = CONSTIT_MYO[0]/4 * ufl.exp(Q) * ufl.as_matrix([
-            [4*fbr_con*E[0,0], 2*CONSTIT_MYO[3]*(E[1,0] + E[0,1])],
-            [2*CONSTIT_MYO[3]*(E[0,1] + E[1,0]), 4*CONSTIT_MYO[2]*E[1,1]],
-        ]) - p * Z_un
-        sig = 1/J * F*piola*F.T
-        return sig
+    # # +==+ Setup stress output
+    # def cauchy_tensor(u, p, x, r):
+    #     # += Tensor Indices
+    #     i, j = ufl.indices(2)
+    #     # += Curvilinear Mapping
+    #     Push = ufl.as_matrix([
+    #         [ufl.cos(r), -ufl.sin(r)],
+    #         [ufl.sin(r), ufl.cos(r)]
+    #     ])
+    #     x_nu = ufl.inv(Push) * x
+    #     u_nu = ufl.inv(Push) * u
+    #     nu = ufl.inv(Push) * (x + u_nu)
+    #     # += Metric Tensors
+    #     Z_un = ufl.grad(x_nu).T * ufl.grad(x_nu)
+    #     Z_co = ufl.grad(nu).T * ufl.grad(nu)
+    #     # += Kinematics
+    #     I = ufl.variable(ufl.Identity(MESH_DIM))
+    #     F = ufl.as_tensor(I[i, j] + ufl.grad(u)[i, j], [i, j]) * Push
+    #     E = ufl.variable(ufl.as_tensor((0.5*(Z_co[i,j] - Z_un[i,j])), [i, j]))
+    #     J = ufl.variable(ufl.det(F))
+    #     # += Material Setup | Guccione
+    #     Q = (
+    #         fbr_con * E[0,0]**2 + 
+    #         CONSTIT_MYO[2] * (E[1,1]**2) + 
+    #         CONSTIT_MYO[3] * (2*E[0,1]*E[1,0])
+    #     )
+    #     piola = CONSTIT_MYO[0]/4 * ufl.exp(Q) * ufl.as_matrix([
+    #         [4*fbr_con*E[0,0], 2*CONSTIT_MYO[3]*(E[1,0] + E[0,1])],
+    #         [2*CONSTIT_MYO[3]*(E[0,1] + E[1,0]), 4*CONSTIT_MYO[2]*E[1,1]],
+    #     ]) - p * Z_un
+    #     sig = 1/J * F*piola*F.T
+    #     return sig
     
-    # +==+ Setup strain output
-    def green_tensor(u, p, x, r):
-        # += Tensor Indices
-        i, j = ufl.indices(2)
-        # += Curvilinear Mapping
-        Push = ufl.as_matrix([
-            [ufl.cos(r), -ufl.sin(r)],
-            [ufl.sin(r), ufl.cos(r)]
-        ])
-        x_nu = ufl.inv(Push) * x
-        u_nu = ufl.inv(Push) * u
-        nu = ufl.inv(Push) * (x + u_nu)
-        # += Metric Tensors
-        Z_un = ufl.grad(x_nu).T * ufl.grad(x_nu)
-        Z_co = ufl.grad(nu).T * ufl.grad(nu)
-        # += Kinematics
-        I = ufl.variable(ufl.Identity(DIM))
-        F = ufl.as_tensor(I[i, j] + ufl.grad(u)[i, j], [i, j]) * Push
-        E = ufl.as_tensor((0.5*(Z_co[i,j] - Z_un[i,j])), [i, j])
-        return ufl.as_tensor([[E[0, 0], E[0, 1]], [E[0, 1], E[1, 1]]])
+    # # +==+ Setup strain output
+    # def green_tensor(u, p, x, r):
+    #     # += Tensor Indices
+    #     i, j = ufl.indices(2)
+    #     # += Curvilinear Mapping
+    #     Push = ufl.as_matrix([
+    #         [ufl.cos(r), -ufl.sin(r)],
+    #         [ufl.sin(r), ufl.cos(r)]
+    #     ])
+    #     x_nu = ufl.inv(Push) * x
+    #     u_nu = ufl.inv(Push) * u
+    #     nu = ufl.inv(Push) * (x + u_nu)
+    #     # += Metric Tensors
+    #     Z_un = ufl.grad(x_nu).T * ufl.grad(x_nu)
+    #     Z_co = ufl.grad(nu).T * ufl.grad(nu)
+    #     # += Kinematics
+    #     I = ufl.variable(ufl.Identity(DIM))
+    #     F = ufl.as_tensor(I[i, j] + ufl.grad(u)[i, j], [i, j]) * Push
+    #     E = ufl.as_tensor((0.5*(Z_co[i,j] - Z_un[i,j])), [i, j])
+    #     return ufl.as_tensor([[E[0, 0], E[0, 1]], [E[0, 1], E[1, 1]]])
 
-    # +==+ Setup Iteration Loop variables
-    # += Preset displacements per iteration
-    phase_ext = np.linspace(DISPLACEMENT/ITS, DISPLACEMENT, ITS)
-    phase_con = np.linspace(DISPLACEMENT, -DISPLACEMENT, ITS*2)
-    phase_exp = np.linspace(-DISPLACEMENT, 0, ITS)
-    bc_u_iter = np.concatenate([phase_ext, phase_con, phase_exp])
-    bc_u_iter = [DISPLACEMENT]
+    # # +==+ Setup Iteration Loop variables
+    # # += Preset displacements per iteration
+    # phase_ext = np.linspace(DISPLACEMENT/ITS, DISPLACEMENT, ITS)
+    # phase_con = np.linspace(DISPLACEMENT, -DISPLACEMENT, ITS*2)
+    # phase_exp = np.linspace(-DISPLACEMENT, 0, ITS)
+    # bc_u_iter = np.concatenate([phase_ext, phase_con, phase_exp])
+    # bc_u_iter = [DISPLACEMENT]
+
     # += Export data
-    Vu_sol, _ = W.sub(0).collapse() 
-    disp = Function(Vu_sol) 
-    disp.name = "U - Displacement"
-    TS = FunctionSpace(mesh=domain, element=("CG", elem_order, (2,2)))
-    sig = Function(TS)
-    sig.name = "S - Cauchy Stress"
-    eps = Function(TS)
-    eps.name = "E - Green Strain"
+    # Vu_sol, _ = W.sub(0).collapse() 
+    # disp = Function(Vu_sol) 
+    # disp.name = "U - Displacement"
+    # TS = FunctionSpace(mesh=domain, element=("CG", elem_order, (2,2)))
+    # sig = Function(TS)
+    # sig.name = "S - Cauchy Stress"
+    # eps = Function(TS)
+    # eps.name = "E - Green Strain"
     # test_name = "TESTING_ITERATION"
     # += Setup file writers
     # dis_file = io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_DISP.bp", disp, engine="BP4")
     # eps_file = io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_EPS.bp", eps, engine="BP4")
     # sig_file = io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_SIG.bp", sig, engine="BP4")
 
-    # += Bounding box for cell searching
-    bb_tree = geometry.bb_tree(domain, domain.topology.dim)
+    Vu_sol, up_to_u_sol = Mxs.sub(0).collapse() 
+    u_sol = Function(Vu_sol) 
 
-    # +==+ Loop deformations
-    for i, d in enumerate(bc_u_iter):
-        # += Attain BC
-        print("     += Iteration: {}".format(i))
-        bc, _ = dir_bc(domain, W, Vx, Vy, d)
-        
-        # += Nonlinear Solver
-        problem = NonlinearProblem(R, w, bc)
-        solver = NewtonSolver(domain.comm, problem)
-        solver.atol = 1e-8
-        solver.rtol = 1e-8
-        solver.convergence_criterion = "incremental"
+    Vp_sol, up_to_p_sol = Mxs.sub(1).collapse() 
+    p_sol = Function(Vp_sol) 
 
-        # += Solve
-        num_its, _ = solver.solve(w)
+    u_sol.name = "disp"
+    p_sol.name = "pressure"
+
+    file = os.path.dirname(os.path.abspath(__file__)) + "/_bp/" + tnm + ".bp"
+    eps_file = io.VTXWriter(MPI.COMM_WORLD, file, u_sol, engine="BP4")
+    
+    # += Nonlinear Solver
+    problem = NonlinearProblem(R, mx, bc)
+    solver = NewtonSolver(domain.comm, problem)
+    solver.atol = 1e-4
+    solver.rtol = 1e-4
+    solver.convergence_criterion = "incremental"
+
+    # +==+==+
+    # Solution and Output
+    # += Solve
+    num_its, converged = solver.solve(mx)
+    if converged:
         print(f"Converged in {num_its} iterations.")
+    else:
+        print(f"Not converged after {num_its} iterations.")
 
-        # += Store displacement results
-        u_eval = w.sub(0).collapse()
-        disp.interpolate(u_eval)
-        # += Setup tensor space for stress tensor interpolation
-        cauchy = Expression(
-            e=cauchy_tensor(u_eval, w.sub(1).collapse(), x, fbr_azi), 
-            X=TS.element.interpolation_points()
-        )
-        epsilon = Expression(
-            e=green_tensor(u_eval, None, x, fbr_azi), 
-            X=TS.element.interpolation_points()
-        )
-        sig.interpolate(cauchy)
-        eps.interpolate(epsilon)
+    u_eval = mx.sub(0).collapse()
+    u_sol.interpolate(u_eval)
 
-        TEST_POINTS = (7, 5)
-        x_locs = np.round([(x+1) * 0.125 for x in range(0, TEST_POINTS[0], 1)], 3)
-        y_locs = np.round([x * 0.2 + 0.1 for x in range(0, TEST_POINTS[1], 1)], 3)
-        x_u_data = np.zeros(TEST_POINTS)
-        y_u_data = np.zeros(TEST_POINTS)
-        xy_e_data = np.zeros(TEST_POINTS)
-        xy_s_data = np.zeros(TEST_POINTS)
+    eps_file.write(0)
 
-        for m, ylo in enumerate(y_locs):
-            for n, xlo in enumerate(x_locs):
-                # x0 = locate_entities_boundary(mesh=domain, dim=MESH_DIM-1, marker=lambda x: np.isclose(x[0], xlo, rtol=0.1, atol=0.1))
-                # y0 = locate_entities_boundary(mesh=domain, dim=MESH_DIM-1, marker=lambda x: np.isclose(x[1], ylo))
-                cells = []
-                points_on_proc = []
-                cell_candidates = geometry.compute_collisions_points(bb_tree, [xlo, ylo, 0])
-                colliding_cells = geometry.compute_colliding_cells(domain, cell_candidates,[xlo, ylo, 0])
-                disp_xy = disp.eval([xlo, ylo, 0], colliding_cells[0])
-                x_u_data[n, m] = disp_xy[0]
-                y_u_data[n, m] = disp_xy[1]
-                sig_xy = sig.eval([xlo, ylo, 0], colliding_cells[0])
-                xy_s_data[n, m] = sig_xy[1]
-                eps_xy = eps.eval([xlo, ylo, 0], colliding_cells[0])
-                xy_e_data[n, m] = eps_xy[1]
-
-        np.save("P_Branch_Contraction/numpy_data/disp_x_" + test_name + "_" + ID + ".npy", x_u_data)
-        np.save("P_Branch_Contraction/numpy_data/disp_y_" + test_name + "_" + ID + ".npy", y_u_data)
-        np.save("P_Branch_Contraction/numpy_data/sig_xy_" + test_name + "_" + ID + ".npy", xy_s_data)
-        np.save("P_Branch_Contraction/numpy_data/eps_xy_" + test_name + "_" + ID + ".npy", xy_e_data)
-
-        # += Write files 
-        # for j in range(1, 10, 1): dis_file.write(i*10 + j)
-        # for j in range(1, 10, 1): eps_file.write(i*10 + j)
-        # for j in range(1, 10, 1): sig_file.write(i*10 + j)
-
-    # += Close files
-    # dis_file.close()
-    # eps_file.close()
-    # sig_file.close()
+    eps_file.close()
 
     return None
 
@@ -438,6 +408,8 @@ def msh_(tnm, msh, depth):
     # +==+ Load geometry data
     np_cen, np_cma = net_csv(tnm, depth)
 
+    print(gmsh.model.occ.get_entities())
+
     # +==+ Create zdisc faces
     srf_tgs, wir_tgs = [], []
     for x, y, z in np_cen:
@@ -484,10 +456,14 @@ def msh_(tnm, msh, depth):
                 gmsh.model.occ.synchronize()   
                 EL_TAGS[4] += 1
 
+    print(gmsh.model.occ.get_entities())
+
     # +==+ Find overlaps and remove them
-    for i in range(0, DIM+1, 1):
-        tgs = gmsh.model.occ.get_entities(dim=i)
-        gmsh.model.occ.fragment([(i, tgs[0][1])], [j for j in tgs[1:]])
+    # for i in range(0, DIM+1, 1):
+    #     tgs = gmsh.model.occ.get_entities(dim=i)
+    #     gmsh.model.occ.fragment([(i, tgs[0][1])], [j for j in tgs[1:]], removeObject=True, removeTool=True)
+
+    print(gmsh.model.occ.get_entities())
 
     # +==+ Generate physical groups
     for i in range(0, DIM+1, 1):
@@ -501,17 +477,17 @@ def msh_(tnm, msh, depth):
         }
         # += Dataframe for iteration
         df = pd.DataFrame(data).transpose().sort_values(by=[0], ascending=False)
-        # += Find overlaping surfaces from through sections and remove them
-        if i == 2:
-            _drop = []
-            for _j, tg in enumerate(tgs):
-                # += Remove based on centre of mass {add mass too if need more specific}
-                for _tg in tgs[_j:]:
-                    _obj_com = [round(x, 0) for x in [*gmsh.model.occ.get_center_of_mass(dim=i, tag=tg)]]
-                    _too_com = [round(x, 0) for x in [*gmsh.model.occ.get_center_of_mass(dim=i, tag=_tg)]]
-                    if (_obj_com == _too_com) and (tg != _tg):
-                        _drop.append([tg, _tg])
-                        df = df.drop([_tg])
+        # # += Find overlaping surfaces from through sections and remove them
+        # if i == 2:
+        #     _drop = []
+        #     for _j, tg in enumerate(tgs):
+        #         # += Remove based on centre of mass {add mass too if need more specific}
+        #         for _tg in tgs[_j:]:
+        #             _obj_com = [round(x, 0) for x in [*gmsh.model.occ.get_center_of_mass(dim=i, tag=tg)]]
+        #             _too_com = [round(x, 0) for x in [*gmsh.model.occ.get_center_of_mass(dim=i, tag=_tg)]]
+        #             if (_obj_com == _too_com) and (tg != _tg):
+        #                 _drop.append([tg, _tg])
+        #                 df = df.drop([_tg])
         # += Generate physical groups 
         for n, (j, row) in enumerate(df.iterrows()):
             # += If of Dimension 2 find the Z-Discs from centroid data
@@ -519,10 +495,11 @@ def msh_(tnm, msh, depth):
                 # += Check if it is a border region
                 try:
                     gmsh.model.add_physical_group(
-                        dim=i, tags=[j], tag=SUR_OBJ_TAGS[row[1]][0], name=SUR_OBJ_TAGS[row[1]][1]
+                        dim=i, tags=[j], tag=SUR_OBJ_ASSIGN[row[1]][0], name=SUR_OBJ_ASSIGN[row[1]][1]
                     )
-                    TG_C[DIM-1].append(SUR_OBJ_TAGS[row[1]][0])
+                    TG_C[DIM-1].append(SUR_OBJ_ASSIGN[row[1]][0])
                 except:
+                    continue
                     # += Determine if it is a Z-Disc
                     cen = np.array([round(x, 0) for x in [*gmsh.model.occ.get_center_of_mass(dim=i, tag=j)]])
                     if np.any([np.all(x) for x in np.isclose(cen, np_cen)]):
@@ -555,8 +532,8 @@ def msh_(tnm, msh, depth):
     # +==+ Generate Mesh
     gmsh.model.occ.synchronize()
     gmsh.model.mesh.generate(dim=DIM)
-    gmsh.model.mesh.refine()
-    gmsh.model.mesh.setOrder(order=ORDER)
+    # gmsh.model.mesh.refine()
+    gmsh.model.mesh.setOrder(order=ORDER) 
 
     # +==+ Write File
     file = os.path.dirname(os.path.abspath(__file__)) + "/_msh/" + tnm + ".msh"
@@ -589,7 +566,7 @@ if __name__ == '__main__':
     # args = parser.parse_args()
     # tnm = args.test_name
     # msh = args.auto_mesh
-    tnm = "TESTSARC3MIDDLE"
+    tnm = "TESTCUBE"
     msh = True
     # += Run
     print("\t" * depth + "!! BEGIN TEST: " + tnm + " !!")
