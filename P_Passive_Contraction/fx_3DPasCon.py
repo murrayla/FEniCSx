@@ -11,7 +11,7 @@
 # Setup
 # += Imports
 from dolfinx import io,  default_scalar_type
-from dolfinx.fem import Function, FunctionSpace, dirichletbc, locate_dofs_topological, Constant
+from dolfinx.fem import Function, FunctionSpace, dirichletbc, locate_dofs_topological, Constant, Expression
 from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
 from mpi4py import MPI
@@ -141,11 +141,12 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     fbr_azi, fbr_elv, fbr_con = Function(Dcs), Function(Dcs), Function(Dcs)
     cyt_tgs = ct.find(tg_c[DIM][0])
     # += Cytosol [DEFAULT]
-    fbr_azi.x.array[:] = np.full_like(fbr_azi.x.array[:], I_0, dtype=default_scalar_type)
-    fbr_con.x.array[:] = np.full_like(fbr_azi.x.array[:], CONSTIT_CYT[0], dtype=default_scalar_type)
-    # fbr_azi.x.array[cyt_tgs] = np.full_like(cyt_tgs, I_0, dtype=default_scalar_type)
-    # fbr_elv.x.array[cyt_tgs] = np.full_like(cyt_tgs, I_0, dtype=default_scalar_type)
-    # fbr_con.x.array[cyt_tgs] = np.full_like(cyt_tgs, CONSTIT_CYT[0], dtype=default_scalar_type)
+    # print(len(fbr_azi_ten.x.array))
+    # fbr_azi.x.array[:] = np.full_like(fbr_azi.x.array[:], I_0, dtype=default_scalar_type)
+    # fbr_con.x.array[:] = np.full_like(fbr_azi.x.array[:], CONSTIT_CYT[0], dtype=default_scalar_type)
+    fbr_azi.x.array[cyt_tgs] = np.full_like(cyt_tgs, I_0, dtype=default_scalar_type)
+    fbr_elv.x.array[cyt_tgs] = np.full_like(cyt_tgs, I_0, dtype=default_scalar_type)
+    fbr_con.x.array[cyt_tgs] = np.full_like(cyt_tgs, CONSTIT_CYT[0], dtype=default_scalar_type)
     # += For each other orientation assign arrays
     # for i in range(0, len(tg_s[DIM]["tag"]), 1):
     #     myo_tgs = ct.find(tg_s[DIM]["tag"][i])
@@ -160,27 +161,27 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     u, p = ufl.split(mx)
     # += Initial
     # +==+ Curvilinear setup
-    # xx = ufl.SpatialCoordinate()
+    x = ufl.SpatialCoordinate(domain)
     
-    x = Function(Sos)
+    # x = Function(Sos)
     # Push = ufl.as_matrix([
     #     [ufl.cos(fbr_azi), -ufl.sin(fbr_azi), 0],
     #     [ufl.sin(fbr_azi), ufl.cos(fbr_azi), 0],
     #     [0, 0, 1]
     # ])
-    x.interpolate(lambda x: (x[0], x[1], x[2]))
+    # x.interpolate(lambda x: (x[0], x[1], x[2]))
     i, j, k, a, b = ufl.indices(5)
     # # += Curvilinear mapping dependent on subdomain values
-    # Push = ufl.as_matrix([
-    #     [ufl.cos(fbr_azi), -ufl.sin(fbr_azi), 0],
-    #     [ufl.sin(fbr_azi), ufl.cos(fbr_azi), 0],
-    #     [0, 0, 1]
-    # ])
     Push = ufl.as_matrix([
-        [1, 0, 0],
-        [0, 1, 0],
+        [ufl.cos(fbr_azi), -ufl.sin(fbr_azi), 0],
+        [ufl.sin(fbr_azi), ufl.cos(fbr_azi), 0],
         [0, 0, 1]
     ])
+    # Push = ufl.as_matrix([
+    #     [1, 0, 0],
+    #     [0, 1, 0],
+    #     [0, 0, 1]
+    # ])
     # * ufl.as_matrix([
     #     [1, 0, 0],
     #     [0, ufl.cos(fbr_elv), -ufl.sin(fbr_elv)],
@@ -190,29 +191,50 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # x_nu = ufl.inv(Push) * x
     # u_nu = ufl.inv(Push) * u
     # nu = ufl.inv(Push) * (x + u_nu)
-    x_nu = x
-    u_nu = u
-    nu = (x + u_nu)
+    # x_nu = x
+    # u_nu = u
+    # nu = (x + u_nu)
+
+    x_nu = ufl.inv(Push) * x
+    u_nu = ufl.inv(Push) * u
+    nu = ufl.inv(Push) * (x + u_nu)
+
     # += Metric tensors
-    Z_co = ufl.grad(x_nu) * ufl.grad(x_nu).T
+    Z_co = ufl.grad(x_nu).T * ufl.grad(x_nu)
     Z_ct = ufl.inv(Z_co)
-    z_co = ufl.grad(nu) * ufl.grad(nu).T
+    z_co = ufl.grad(nu).T * ufl.grad(nu)
     z_ct = ufl.inv(z_co)
+
     # += Christoffel Symbol | Γ^{i}_{j, a}
     gamma = ufl.as_tensor((
-        0.5 * z_ct[k, a] * (
-            ufl.grad(z_co)[a, i, j] + ufl.grad(z_co)[a, j, i] - ufl.grad(z_co)[i, j, a]
+        0.5 * Z_ct[k, a] * (
+            ufl.grad(Z_co)[a, i, j] + ufl.grad(Z_co)[a, j, i] - ufl.grad(Z_co)[i, j, a]
         )
     ), [k, i, j])
+    # += Covariant Derivative
+    covDev = ufl.grad(v) - ufl.as_tensor(v[k]*gamma[k, i, j], [i, j])
+
+    # # += Christoffel Symbol | Γ^{i}_{j, a}
     # gamma = ufl.as_tensor((
-    #     (ufl.grad(Z_co)[k, i, j] * (Z_co)[k, j])
+    #     0.5 * z_ct[k, a] * (
+    #         ufl.grad(z_co)[a, i, j] + ufl.grad(z_co)[a, j, i] - ufl.grad(z_co)[i, j, a]
+    #     )
+    # ), [k, i, j])
+    # covDev = (v[i].dx(k)
+    #     - ufl.as_tensor(gamma[i, j, k]*v[i], [i, j])    
+    # )
+    # gamma = ufl.as_tensor((
+    #    0
     # ), [k, i, j])
     # += Covariant Derivative
-    covDev = ufl.grad(v) - ufl.as_tensor(gamma[k, i, j]*v[k], [i, j])   
-    
+    # covDev = (v[i].dx(k)
+    #     + ufl.as_tensor(gamma[i, k, m]*v[m], [i, j])
+    #     - ufl.as_tensor(gamma[m, j, k]*v[i], [i, j])    
+    # )
+
     # += Kinematics variables
     I = ufl.variable(ufl.Identity(DIM))
-    F = ufl.as_tensor(I[i, j] + ufl.grad(u)[i, j], [i, j])
+    F = ufl.as_tensor(I[i, j] + ufl.grad(u_nu)[i, j], [i, j]) * Push
     C = ufl.variable(ufl.as_tensor(F[k, i]*F[k, j], [i, j]))
     E = ufl.variable(ufl.as_tensor((0.5*(z_co[i,j] - Z_co[i,j])), [i, j]))
     J = ufl.variable(ufl.det(F))
@@ -226,7 +248,7 @@ def fx_(tnm, file, tg_c, tg_s, depth):
             [4*1*E[0,0], 2*1*(E[1,0] + E[0,1]), 2*1*(E[2,0] + E[0,2])],
             [2*1*(E[0,1] + E[1,0]), 4*1*E[1,1], 2*1*(E[2,1] + E[1,2])],
             [2*1*(E[0,2] + E[2,0]), 2*1*(E[1,2] + E[2,1]), 4*1*E[2,2]],
-        ]) - p * I
+        ]) - p * Z_co
     # Q = (
     #     fbr_con * E[0,0]**2 + 
     #     CONSTIT_MYO[2] * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
@@ -680,7 +702,7 @@ if __name__ == '__main__':
     # args = parser.parse_args()
     # tnm = args.test_name
     # msh = args.auto_mesh
-    tnm = "CUBE_GC_10_dir_ani"
+    tnm = "CUBE_GC_20_dir_ani"
     msh = True
     # += Run
     print("\t" * depth + "!! BEGIN TEST: " + tnm + " !!")
