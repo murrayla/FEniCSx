@@ -52,6 +52,7 @@ LOCS_COM = [
     (EDGE[0]/2, EDGE[1]/2, F_0), (EDGE[0]/2, EDGE[1]/2, EDGE[2]) 
 ]
 SUR_OBJ_ASSIGN = dict(zip(LOCS_COM, [[n+1, name] for n, name in enumerate(SURF_NAMES)]))
+EMF_PATH = "/Users/murrayla/Documents/main_PhD/P_Segmentations/myofibril_segmentation/Segmented_Data/"
 
 # +==+==+==+
 # dir_bc
@@ -97,6 +98,37 @@ def dir_bc(mix_vs, Vx, Vy, Vz, ft, du):
     # bc = [bc_UxX0, bc_UxX1, bc_UyX0, bc_UyX1]
 
     return bc
+
+# +==+==+==+
+# prop_csv:
+#   Inputs: 
+#       tnm  | str | test name
+#   Outputs:
+#       np arrays of property data
+def prop_csv(tnm, depth):
+    depth += 1
+    print("\t" * depth + "+= Load z-disc property data...")
+    file_path = "/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/Vec_files/"
+    files = []
+    cdt = tnm.split("_")[0]
+    nmb = tnm.split("_")[1] + "_"
+    avd = "*" + nmb
+    if cdt == "raw":
+        file_path += "health/"
+    else:
+        file_path += "infarct/"
+    for file in os.listdir(file_path):
+        print(file)
+        if ("_props" in file) and (nmb in file) and (avd not in file):
+            if "_t_" in files: 
+                ele_df = pd.read_csv(file_path + file)
+            else:
+                azi_df = pd.read_csv(file_path + file)
+
+    print(ele_df)
+    print(azi_df)
+    exit()
+    return np.array(cent_data), np.array(cmat_data)
 
 # +==+==+==+
 # fx_
@@ -146,7 +178,7 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     
     # +==+ Boundary Conditions
     print("\t" * depth + "+= Assign Boundary Conditions")
-    bc = dir_bc(Mxs, Vx, Vy, Vz, ft, EDGE[0] * LAMBDA)
+    bc = dir_bc(Mxs, Vx, Vy, Vz, ft, EDGE[0] * str(tnm.split("_")[3])/100)
     
     # +==+ Create rotation and material property arrays
     print("\t" * depth + "+= Assign Fibre Directions")
@@ -362,10 +394,15 @@ def msh_(tnm, msh, depth):
 #       msh  | bool | indicator of mesh generation style
 #   Outputs:
 #       .bp folder of deformation
-def main(tnm, msh, depth):
+def main(tnm, msh, emf, depth):
     depth += 1
     # += Mesh generation 
-    file, tg_s, tg_c = msh_(tnm, msh, depth)
+    if msh:
+        file, tg_s, tg_c = msh_(tnm, msh, depth)
+    else:
+        tg_s = {2: [], 3: {'tag': [], 'angles': []}}
+        tg_c = {2: [5, 6, 1, 2, 3, 4], 3: [10000]}
+        file = os.path.dirname(os.path.abspath(__file__)) + "/_msh/" + "EMSimCube" + ".msh"
     # += Enter FEniCSx
     fx_(tnm, file, tg_c, tg_s, depth)
 
@@ -380,9 +417,14 @@ if __name__ == '__main__':
     # args = parser.parse_args()
     # tnm = args.test_name
     # msh = args.auto_mesh
-    tnm = "CUBE_GC_20_dir_ani"
-    msh = True
+    msh = False
+    emf = "raw_0"
+    ceq = "GC"
+    dsp = "20"
+    etp = "dir_ani"
+    tnm = "_".join([emf, ceq, dsp, etp])
     # += Run
+    prop_csv(tnm, depth)
     print("\t" * depth + "!! BEGIN TEST: " + tnm + " !!")
     main(tnm, msh, depth)
     print("\t" * depth + "!! END TEST: " + tnm + " !!")
