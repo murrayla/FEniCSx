@@ -104,31 +104,33 @@ def dir_bc(mix_vs, Vx, Vy, Vz, ft, du):
 #   Inputs: 
 #       tnm  | str | test name
 #   Outputs:
-#       np arrays of property data
+#       dataframe with orientation data
 def prop_csv(tnm, depth):
     depth += 1
+    # += Determine file location
     print("\t" * depth + "+= Load z-disc property data...")
     file_path = "/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/Vec_files/"
     files = []
     cdt = tnm.split("_")[0]
     nmb = tnm.split("_")[1] + "_"
-    avd = "*" + nmb
+    # += Splice fields
     if cdt == "raw":
         file_path += "health/"
     else:
         file_path += "infarct/"
+    # += Read appropriate file into dataframe
     for file in os.listdir(file_path):
         print(file)
-        if ("_props" in file) and (nmb in file) and (avd not in file):
-            if "_t_" in files: 
+        if ("_props" in file) and (nmb in file):
+            if "_t_" in file: 
                 ele_df = pd.read_csv(file_path + file)
             else:
                 azi_df = pd.read_csv(file_path + file)
-
-    print(ele_df)
-    print(azi_df)
-    exit()
-    return np.array(cent_data), np.array(cmat_data)
+    # += Create new dataframe
+    ang_df = pd.concat(
+        [azi_df.iloc[:, [1, 4, 7]], ele_df.iloc[:, 2]], axis=1
+    )
+    return ang_df
 
 # +==+==+==+
 # fx_
@@ -155,17 +157,6 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # += Mixed Space
     Mxs = FunctionSpace(mesh=domain, element=ufl.MixedElement([V2, V1]))
     # += Vector Spaces and Tensor Space
-    
-    # quadrature_points, wts = basix.make_quadrature(
-    #     basix.cell.string_to_type(domain.topology.cell_name()), QUADRATURE)
-    # x = ufl.SpatialCoordinate(domain)
-    # x_expr = Expression(x, quadrature_points)
-
-    # detJ = Expression(ufl.JacobianDeterminant(domain), quadrature_points)
-
-    # for i in range(domain.topology.index_map(domain.topology.dim).size_local):
-    #     print(
-    #         f"Cell {i}, quadrature points {x_expr.eval(domain, [i])}, detJ {detJ.eval(domain, [i])}")
 
     Tes = FunctionSpace(mesh=domain, element=("Lagrange", ORDER, (DIM, DIM)))
     Dcs = FunctionSpace(mesh=domain, element=("Discontinuous Lagrange", 0))
