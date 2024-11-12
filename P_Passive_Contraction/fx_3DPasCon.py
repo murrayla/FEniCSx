@@ -19,6 +19,7 @@ import operator as op
 import pandas as pd
 import numpy as np
 import argparse
+import basix
 import gmsh
 import ufl
 import csv
@@ -114,16 +115,28 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # += Load mesh data
     domain, ct, ft = io.gmshio.read_from_msh(filename=file, comm=MPI.COMM_WORLD, rank=0, gdim=DIM)
     print("\t" * depth + "+= Setup Vector Space ")
-    # += Create vector spaces
-    V2 = ufl.VectorElement(family="CG", cell=domain.ufl_cell(), degree=ORDER)
-    V1 = ufl.FiniteElement(family="CG", cell=domain.ufl_cell(), degree=ORDER-1)  
+    # += Second and First order Continuous
+    V2 = ufl.VectorElement(family="Lagrange", cell=domain.ufl_cell(), degree=ORDER, quad_scheme="default")
+    V1 = ufl.FiniteElement(family="Lagrange", cell=domain.ufl_cell(), degree=ORDER-1, quad_scheme="default")
+    # += Quadrature Element
+    Q = ufl.FiniteElement(family="Quadrature", cell=domain.ufl_cell(), degree=ORDER, quad_scheme="default")
     # += Mixed Space
     Mxs = FunctionSpace(mesh=domain, element=ufl.MixedElement([V2, V1]))
     # += Vector Spaces and Tensor Space
-    Sos = FunctionSpace(mesh=domain, element=V2)
-    Fos = FunctionSpace(mesh=domain, element=V1)
-    Tes = FunctionSpace(mesh=domain, element=("CG", ORDER, (DIM, DIM)))
-    Dcs = FunctionSpace(mesh=domain, element=("DG", 0))
+    
+    # quadrature_points, wts = basix.make_quadrature(
+    #     basix.cell.string_to_type(domain.topology.cell_name()), QUADRATURE)
+    # x = ufl.SpatialCoordinate(domain)
+    # x_expr = Expression(x, quadrature_points)
+
+    # detJ = Expression(ufl.JacobianDeterminant(domain), quadrature_points)
+
+    # for i in range(domain.topology.index_map(domain.topology.dim).size_local):
+    #     print(
+    #         f"Cell {i}, quadrature points {x_expr.eval(domain, [i])}, detJ {detJ.eval(domain, [i])}")
+
+    Tes = FunctionSpace(mesh=domain, element=("Lagrange", ORDER, (DIM, DIM)))
+    Dcs = FunctionSpace(mesh=domain, element=("Discontinuous Lagrange", 0))
 
     # +==+ Extract subdomains for dofs
     V, _ = Mxs.sub(0).collapse()
@@ -141,7 +154,6 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     fbr_azi, fbr_elv, fbr_con = Function(Dcs), Function(Dcs), Function(Dcs)
     cyt_tgs = ct.find(tg_c[DIM][0])
     # += Cytosol [DEFAULT]
-    # print(len(fbr_azi_ten.x.array))
     # fbr_azi.x.array[:] = np.full_like(fbr_azi.x.array[:], I_0, dtype=default_scalar_type)
     # fbr_con.x.array[:] = np.full_like(fbr_azi.x.array[:], CONSTIT_CYT[0], dtype=default_scalar_type)
     fbr_azi.x.array[cyt_tgs] = np.full_like(cyt_tgs, I_0, dtype=default_scalar_type)
@@ -182,19 +194,13 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     #     [0, 1, 0],
     #     [0, 0, 1]
     # ])
-    # * ufl.as_matrix([
-    #     [1, 0, 0],
-    #     [0, ufl.cos(fbr_elv), -ufl.sin(fbr_elv)],
-    #     [0, ufl.sin(fbr_elv), ufl.cos(fbr_elv)]
-    # ])
-    # += Subdomain dependent rotations of displacement and coordinates
-    # x_nu = ufl.inv(Push) * x
-    # u_nu = ufl.inv(Push) * u
-    # nu = ufl.inv(Push) * (x + u_nu)
-    # x_nu = x
-    # u_nu = u
-    # nu = (x + u_nu)
+    Push = Push * ufl.as_matrix([
+        [1, 0, 0],
+        [0, ufl.cos(fbr_elv), -ufl.sin(fbr_elv)],
+        [0, ufl.sin(fbr_elv), ufl.cos(fbr_elv)]
+    ])
 
+    # += Subdomain dependent rotations of displacement and coordinates
     x_nu = ufl.inv(Push) * x
     u_nu = ufl.inv(Push) * u
     nu = ufl.inv(Push) * (x + u_nu)
@@ -214,87 +220,25 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # += Covariant Derivative
     covDev = ufl.grad(v) - ufl.as_tensor(v[k]*gamma[k, i, j], [i, j])
 
-    # # += Christoffel Symbol | Γ^{i}_{j, a}
-    # gamma = ufl.as_tensor((
-    #     0.5 * z_ct[k, a] * (
-    #         ufl.grad(z_co)[a, i, j] + ufl.grad(z_co)[a, j, i] - ufl.grad(z_co)[i, j, a]
-    #     )
-    # ), [k, i, j])
-    # covDev = (v[i].dx(k)
-    #     - ufl.as_tensor(gamma[i, j, k]*v[i], [i, j])    
-    # )
-    # gamma = ufl.as_tensor((
-    #    0
-    # ), [k, i, j])
-    # += Covariant Derivative
-    # covDev = (v[i].dx(k)
-    #     + ufl.as_tensor(gamma[i, k, m]*v[m], [i, j])
-    #     - ufl.as_tensor(gamma[m, j, k]*v[i], [i, j])    
-    # )
-
     # += Kinematics variables
     I = ufl.variable(ufl.Identity(DIM))
     F = ufl.as_tensor(I[i, j] + ufl.grad(u_nu)[i, j], [i, j]) * Push
     C = ufl.variable(ufl.as_tensor(F[k, i]*F[k, j], [i, j]))
     E = ufl.variable(ufl.as_tensor((0.5*(z_co[i,j] - Z_co[i,j])), [i, j]))
     J = ufl.variable(ufl.det(F))
+
     # += Material Setup | Guccione
     Q = (
-        1 * E[0,0]**2 + 
-        1 * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
-        1 * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
+        fbr_con * E[0,0]**2 + 
+        CONSTIT_MYO[2] * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
+        CONSTIT_MYO[3] * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
     )
-    piola = 1/2 * ufl.exp(Q) * ufl.as_matrix([
-            [4*1*E[0,0], 2*1*(E[1,0] + E[0,1]), 2*1*(E[2,0] + E[0,2])],
-            [2*1*(E[0,1] + E[1,0]), 4*1*E[1,1], 2*1*(E[2,1] + E[1,2])],
-            [2*1*(E[0,2] + E[2,0]), 2*1*(E[1,2] + E[2,1]), 4*1*E[2,2]],
-        ]) - p * Z_co
-    # Q = (
-    #     fbr_con * E[0,0]**2 + 
-    #     CONSTIT_MYO[2] * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
-    #     CONSTIT_MYO[3] * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
-    # )
-    # piola = CONSTIT_MYO[0]/2 * ufl.exp(Q) * ufl.as_matrix([
-    #     [4*fbr_con*E[0,0], 2*CONSTIT_MYO[3]*(E[1,0] + E[0,1]), 2*CONSTIT_MYO[3]*(E[2,0] + E[0,2])],
-    #     [2*CONSTIT_MYO[3]*(E[0,1] + E[1,0]), 4*CONSTIT_MYO[2]*E[1,1], 2*CONSTIT_MYO[2]*(E[2,1] + E[1,2])],
-    #     [2*CONSTIT_MYO[3]*(E[0,2] + E[2,0]), 2*CONSTIT_MYO[2]*(E[1,2] + E[2,1]), 4*CONSTIT_MYO[3]*E[2,2]],
-    # ]) - p * Z_co
+    piola = CONSTIT_MYO[0]/2 * ufl.exp(Q) * ufl.as_matrix([
+        [4*fbr_con*E[0,0], 2*CONSTIT_MYO[3]*(E[1,0] + E[0,1]), 2*CONSTIT_MYO[3]*(E[2,0] + E[0,2])],
+        [2*CONSTIT_MYO[3]*(E[0,1] + E[1,0]), 4*CONSTIT_MYO[2]*E[1,1], 2*CONSTIT_MYO[2]*(E[2,1] + E[1,2])],
+        [2*CONSTIT_MYO[3]*(E[0,2] + E[2,0]), 2*CONSTIT_MYO[2]*(E[1,2] + E[2,1]), 4*CONSTIT_MYO[3]*E[2,2]],
+    ]) - p * Z_co
     term = ufl.as_tensor(piola[a, b] * F[j, b] * covDev[j, a])
-
-    # # += Kinematics variables
-    # I = ufl.variable(ufl.Identity(DIM))
-    # F = ufl.as_tensor(I[i, j] + ufl.grad((u + u0))[i, j], [i, j])
-    # C = ufl.variable(ufl.as_tensor(F[k, i]*F[k, j], [i, j]))
-    # E = ufl.variable(ufl.as_tensor((0.5*(C[i, j] - I[i, j])), [i, j]))
-    # J = ufl.variable(ufl.det(F))
-    # # += Material Setup | Guccione
-    # Q = (
-    #     1 * E[0,0]**2 + 
-    #     1 * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
-    #     1 * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
-    # )
-    # piola = 1/2 * ufl.exp(Q) * ufl.as_matrix([
-    #         [4*1*E[0,0], 2*1*(E[1,0] + E[0,1]), 2*1*(E[2,0] + E[0,2])],
-    #         [2*1*(E[0,1] + E[1,0]), 4*1*E[1,1], 2*1*(E[2,1] + E[1,2])],
-    #         [2*1*(E[0,2] + E[2,0]), 2*1*(E[1,2] + E[2,1]), 4*1*E[2,2]],
-    #     ]) - p * I
-    # term = ufl.as_tensor(piola[a, b] * F[j, b] * covDev[j, a])
-    
-    # $$$$$ MOONEY OPTION 
-    # I = ufl.variable(ufl.Identity(DIM))
-    # F = ufl.as_tensor(I[i, j] + ufl.grad((u + u0))[i, j], [i, j])
-    # C = ufl.variable(ufl.as_tensor(F[k, i]*F[k, j], [i, j]))
-    # E = ufl.variable(ufl.as_tensor((0.5*(C[i, j] - I[i, j])), [i, j]))
-    # J = ufl.variable(ufl.det(F))
-    # Ic = ufl.variable(ufl.tr(C))
-    # IIc = ufl.variable((Ic**2 - ufl.inner(C, C))/2)
-    # psi = 1 * (Ic - 3) + 1 *(IIc - 3) 
-    # term1 = ufl.diff(psi, Ic) + Ic * ufl.diff(psi, IIc)
-    # term2 = -ufl.diff(psi, IIc)
-    # piola = 2 * F * (term1*I + term2*C) + (p + p0) * ufl.inv(I) * J * ufl.inv(F).T
-    
-    # covDev = ufl.grad(v)
-    # term = ufl.as_tensor(piola[a, b] * F[j, b] * covDev[j, a])
 
     # +==+ Solver Setup
     # += Measure assignment
@@ -302,83 +246,6 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     dx = ufl.Measure(integral_type="dx", domain=domain, metadata=metadata)
     # += Residual equation
     R = term * dx + q * (J - 1) * dx
-
-    # # +==+ Setup stress output
-    # def cauchy_tensor(u, p, x, r):
-    #     # += Tensor Indices
-    #     i, j = ufl.indices(2)
-    #     # += Curvilinear Mapping
-    #     Push = ufl.as_matrix([
-    #         [ufl.cos(r), -ufl.sin(r)],
-    #         [ufl.sin(r), ufl.cos(r)]
-    #     ])
-    #     x_nu = ufl.inv(Push) * x
-    #     u_nu = ufl.inv(Push) * u
-    #     nu = ufl.inv(Push) * (x + u_nu)
-    #     # += Metric Tensors
-    #     Z_un = ufl.grad(x_nu).T * ufl.grad(x_nu)
-    #     Z_co = ufl.grad(nu).T * ufl.grad(nu)
-    #     # += Kinematics
-    #     I = ufl.variable(ufl.Identity(MESH_DIM))
-    #     F = ufl.as_tensor(I[i, j] + ufl.grad(u)[i, j], [i, j]) * Push
-    #     E = ufl.variable(ufl.as_tensor((0.5*(Z_co[i,j] - Z_un[i,j])), [i, j]))
-    #     J = ufl.variable(ufl.det(F))
-    #     # += Material Setup | Guccione
-    #     Q = (
-    #         fbr_con * E[0,0]**2 + 
-    #         CONSTIT_MYO[2] * (E[1,1]**2) + 
-    #         CONSTIT_MYO[3] * (2*E[0,1]*E[1,0])
-    #     )
-    #     piola = CONSTIT_MYO[0]/4 * ufl.exp(Q) * ufl.as_matrix([
-    #         [4*fbr_con*E[0,0], 2*CONSTIT_MYO[3]*(E[1,0] + E[0,1])],
-    #         [2*CONSTIT_MYO[3]*(E[0,1] + E[1,0]), 4*CONSTIT_MYO[2]*E[1,1]],
-    #     ]) - p * Z_un
-    #     sig = 1/J * F*piola*F.T
-    #     return sig
-    
-    # # +==+ Setup strain output
-    # def green_tensor(u, p, x, r):
-    #     # += Tensor Indices
-    #     i, j = ufl.indices(2)
-    #     # += Curvilinear Mapping
-    #     Push = ufl.as_matrix([
-    #         [ufl.cos(r), -ufl.sin(r)],
-    #         [ufl.sin(r), ufl.cos(r)]
-    #     ])
-    #     x_nu = ufl.inv(Push) * x
-    #     u_nu = ufl.inv(Push) * u
-    #     nu = ufl.inv(Push) * (x + u_nu)
-    #     # += Metric Tensors
-    #     Z_un = ufl.grad(x_nu).T * ufl.grad(x_nu)
-    #     Z_co = ufl.grad(nu).T * ufl.grad(nu)
-    #     # += Kinematics
-    #     I = ufl.variable(ufl.Identity(DIM))
-    #     F = ufl.as_tensor(I[i, j] + ufl.grad(u)[i, j], [i, j]) * Push
-    #     E = ufl.as_tensor((0.5*(Z_co[i,j] - Z_un[i,j])), [i, j])
-    #     return ufl.as_tensor([[E[0, 0], E[0, 1]], [E[0, 1], E[1, 1]]])
-
-    # # +==+ Setup Iteration Loop variables
-    # # += Preset displacements per iteration
-    # phase_ext = np.linspace(DISPLACEMENT/ITS, DISPLACEMENT, ITS)
-    # phase_con = np.linspace(DISPLACEMENT, -DISPLACEMENT, ITS*2)
-    # phase_exp = np.linspace(-DISPLACEMENT, 0, ITS)
-    # bc_u_iter = np.concatenate([phase_ext, phase_con, phase_exp])
-    # bc_u_iter = [DISPLACEMENT]
-
-    # += Export data
-    # Vu_sol, _ = W.sub(0).collapse() 
-    # disp = Function(Vu_sol) 
-    # disp.name = "U - Displacement"
-    # TS = FunctionSpace(mesh=domain, element=("CG", elem_order, (2,2)))
-    # sig = Function(TS)
-    # sig.name = "S - Cauchy Stress"
-    # eps = Function(TS)
-    # eps.name = "E - Green Strain"
-    # test_name = "TESTING_ITERATION"
-    # += Setup file writers
-    # dis_file = io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_DISP.bp", disp, engine="BP4")
-    # eps_file = io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_EPS.bp", eps, engine="BP4")
-    # sig_file = io.VTXWriter(MPI.COMM_WORLD, "P_Branch_Contraction/paraview_bp/" + test_name + ID + "_SIG.bp", sig, engine="BP4")
 
     Vu_sol, up_to_u_sol = Mxs.sub(0).collapse() 
     u_sol = Function(Vu_sol) 
@@ -395,64 +262,9 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # += Nonlinear Solver
     problem = NonlinearProblem(R, mx, bc)
     solver = NewtonSolver(domain.comm, problem)
-    solver.atol = 1e-4
-    solver.rtol = 1e-4
+    solver.atol = 1e-8
+    solver.rtol = 1e-8
     solver.convergence_criterion = "incremental"
-
-    # t= 0
-    # u_eval = mx.sub(0).collapse()
-    # mx0.interpolate(u_eval)
-    # while t < 10:
-    #     t += 1
-    #     num_its, converged = solver.solve(mx)
-    #     print(f"Step {t}: num iterations: {INC}")
-    #     if converged:
-    #         print(f"Converged in {num_its} iterations.")
-    #     else:
-    #         print(f"Not converged after {num_its} iterations.")
-    #     # mx.x.scatter_forward()
-    #     u_eval = mx.sub(0).collapse()
-    #     mx0.interpolate(u_eval)
-    #     eps_file.write(t)
-
-    # Set up the incremental parameters
-    # num_increments = 20  # Number of increments to apply
-    # initial_displacement = 0.0
-    # final_displacement = EDGE[0] * LAMBDA
-    # displacements = np.linspace(initial_displacement, final_displacement, num_increments)
-
-    # # Loop over the displacement increments
-    # for increment, displacement in enumerate(displacements):
-    #     print(f"Applying displacement increment {increment + 1}/{num_increments}: {displacement}")
-        
-    #     # Update boundary conditions with current displacement
-    #     bc = dir_bc(Mxs, Vx, Vy, Vz, ft, displacement)
-    #     print(mx.x.array[:])
-        
-    #     # Solve the problem for the current increment
-    #     problem = NonlinearProblem(R, mx, bc)
-    #     solver = NewtonSolver(domain.comm, problem)
-    #     solver.atol = 1e-7
-    #     solver.rtol = 1e-7
-
-    #     # Solve and check the convergence
-        
-    #     try:
-    #         n, converged = solver.solve(mx)
-    #         print(f"Increment {increment + 1} converged in {n} iterations.")
-    #     except:
-    #         print(f"Increment {increment + 1} did not converge.")
-    #         break
-        
-    #     # Update previous solution as initial guess for next increment
-    #     mx0.x.array[:] = mx.x.array[:]
-
-    #     # Optionally, write out results for each increment
-    #     u_sol.x.array[:] = mx.x.array[up_to_u_sol]
-    #     eps_file.write(increment)
-
-    # # Finalize the file
-    # eps_file.close()
 
     # +==+==+
     # Solution and Output
