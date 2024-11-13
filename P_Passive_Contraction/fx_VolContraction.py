@@ -34,11 +34,12 @@ ZDISC = 5
 ORDER = 2
 LAMBDA = 0.20
 QUADRATURE = 4
+H_ROT = 0.91755
 X, Y, Z = 0, 1, 2
 # CONSTIT_CYT = [0.5]
 CONSTIT_CYT = [1]
-# CONSTIT_MYO = [1, 1, 0.5, 0.5]
-CONSTIT_MYO = [1, 1, 1, 1]
+CONSTIT_MYO = [1, 1, 0.5, 0.5]
+# CONSTIT_MYO = [1, 1, 1, 1]
 PXLS = {"x": 11, "y": 11, "z": 50}
 CUBE = {"x": 1024, "y": 1024, "z": 80}
 SURF_NAMES = ["x0", "x1", "y0", "y1", "z0", "z1"]
@@ -120,7 +121,6 @@ def prop_csv(tnm, depth):
         file_path += "infarct/"
     # += Read appropriate file into dataframe
     for file in os.listdir(file_path):
-        print(file)
         if ("_props" in file) and (nmb in file):
             if "_t_" in file: 
                 ele_df = pd.read_csv(file_path + file)
@@ -157,7 +157,6 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # += Mixed Space
     Mxs = FunctionSpace(mesh=domain, element=ufl.MixedElement([V2, V1]))
     # += Vector Spaces and Tensor Space
-
     Tes = FunctionSpace(mesh=domain, element=("Lagrange", ORDER, (DIM, DIM)))
     Dcs = FunctionSpace(mesh=domain, element=("Discontinuous Lagrange", 0))
 
@@ -169,7 +168,7 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     
     # +==+ Boundary Conditions
     print("\t" * depth + "+= Assign Boundary Conditions")
-    bc = dir_bc(Mxs, Vx, Vy, Vz, ft, EDGE[0] * str(tnm.split("_")[3])/100)
+    bc = dir_bc(Mxs, Vx, Vy, Vz, ft, EDGE[0] * int(tnm.split("_")[3])/100)
     
     # +==+ Create rotation and material property arrays
     print("\t" * depth + "+= Assign Fibre Directions")
@@ -197,7 +196,55 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # += Initial
     # +==+ Curvilinear setup
     x = ufl.SpatialCoordinate(domain)
+    x_n = Function(V)
+    # x_n_vals = x_n.interpolate(lambda x: x)
+    # print(x_n_vals)
+    azi, ele = Function(Vx), Function(Vy)
+
+    def wei_azi(pos, df):
+        mass_ang, mass = 0, 0
+        for _, row in df.iterrows():
+            # += Get position and angle
+            cur = np.fromstring(row["Centroid"].strip('()'), sep=',')
+            ang = row["Orientation [RAD]"]
+            # += Euclidean distance
+            dis = np.linalg.norm(pos - cur)
+            # += Weight
+            wei = 1 / (dis + 1e-10)
+            mass_ang += ang * wei
+            mass += wei
+        # += Compute weighted value
+        wei_ang = mass_ang / mass if mass != 0 else 0
+        return wei_ang - H_ROT
     
+    def wei_ele(pos, df):
+        mass_ang, mass = 0, 0
+        for _, row in df.iterrows():
+            # += Get position and angle
+            cur = np.fromstring(row["Centroid"].strip('()'), sep=',')
+            ang = row["Elevation Orientation [RAD]"]
+            # += Euclidean distance
+            dis = np.linalg.norm(pos - cur)
+            # += Weight
+            wei = 1 / (dis + 1e-10)
+            mass_ang += ang * wei
+            mass += wei
+        # += Compute weighted value
+        wei_ang = mass_ang / mass if mass != 0 else 0
+        return wei_ang
+
+    ang_df = prop_csv(tnm, depth)
+    for i in range(len(azi.x.array[:])):
+        # print(weighted_angle(x_n_vals[i, :], ang_df))
+        # azi.x.array[i] = weighted_angle(x[i, :], ang_df)
+        # for i in range(len(azi.x.array[:])):
+        pos = np.array(x_n.function_space.tabulate_dof_coordinates()[i])
+        print(wei_azi(pos, ang_df))
+        azi.x.array[i] = wei_azi(pos, ang_df)
+        ele.x.array[i] = wei_ele(pos, ang_df)
+        # azi.x.array[i] = 0
+        # ele.x.array[i] = 0
+
     # x = Function(Sos)
     # Push = ufl.as_matrix([
     #     [ufl.cos(fbr_azi), -ufl.sin(fbr_azi), 0],
@@ -208,8 +255,8 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     i, j, k, a, b = ufl.indices(5)
     # # += Curvilinear mapping dependent on subdomain values
     Push = ufl.as_matrix([
-        [ufl.cos(fbr_azi), -ufl.sin(fbr_azi), 0],
-        [ufl.sin(fbr_azi), ufl.cos(fbr_azi), 0],
+        [ufl.cos(azi), -ufl.sin(azi), 0],
+        [ufl.sin(azi), ufl.cos(azi), 0],
         [0, 0, 1]
     ])
     # Push = ufl.as_matrix([
@@ -219,8 +266,8 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # ])
     Push = Push * ufl.as_matrix([
         [1, 0, 0],
-        [0, ufl.cos(fbr_elv), -ufl.sin(fbr_elv)],
-        [0, ufl.sin(fbr_elv), ufl.cos(fbr_elv)]
+        [0, ufl.cos(ele), -ufl.sin(ele)],
+        [0, ufl.sin(ele), ufl.cos(ele)]
     ])
 
     # += Subdomain dependent rotations of displacement and coordinates
@@ -385,7 +432,7 @@ def msh_(tnm, msh, depth):
 #       msh  | bool | indicator of mesh generation style
 #   Outputs:
 #       .bp folder of deformation
-def main(tnm, msh, emf, depth):
+def main(tnm, msh, depth):
     depth += 1
     # += Mesh generation 
     if msh:
@@ -415,7 +462,6 @@ if __name__ == '__main__':
     etp = "dir_ani"
     tnm = "_".join([emf, ceq, dsp, etp])
     # += Run
-    prop_csv(tnm, depth)
     print("\t" * depth + "!! BEGIN TEST: " + tnm + " !!")
     main(tnm, msh, depth)
     print("\t" * depth + "!! END TEST: " + tnm + " !!")
