@@ -12,6 +12,7 @@
 # += Imports
 from dolfinx import io,  default_scalar_type
 from dolfinx.fem import Function, FunctionSpace, dirichletbc, locate_dofs_topological, Constant, Expression
+from dolfinx.mesh import locate_entities, meshtags
 from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
 from mpi4py import MPI
@@ -32,7 +33,6 @@ I_0 = 0
 F_0 = 0.0 
 ZDISC = 5 
 ORDER = 2
-LAMBDA = 0.20
 QUADRATURE = 4
 H_ROT = 0.91755
 X, Y, Z = 0, 1, 2
@@ -43,6 +43,7 @@ CONSTIT_MYO = [1, 1, 1, 1]
 PXLS = {"x": 11, "y": 11, "z": 50}
 CUBE = {"x": 1024, "y": 1024, "z": 80}
 SURF_NAMES = ["x0", "x1", "y0", "y1", "z0", "z1"]
+SCREW_AXIS = {0: ["x0-", 161], 1: ["-x-", 162], 2: ["-x1", 163]}
 EDGE = [PXLS[d]*CUBE[d] for d in ["x", "y", "z"]]
 SUR_OBJ_TAGS = dict(zip(SURF_NAMES, list(range(1, 7, 1))))
 EL_TAGS = {0: 1e0, 1: 1e2, 2: 1e3, 3: 5e3, 4: 1e4, 5: 2e4}
@@ -65,38 +66,45 @@ EMF_PATH = "/Users/murrayla/Documents/main_PhD/P_Segmentations/myofibril_segment
 #   Outputs:
 #       numpy array of boudnary condition assignment data
 def dir_bc(mix_vs, Vx, Vy, Vz, ft, du):
-
-    # +==+ Locate subdomain dofs
-    xx0_dofs, xx1_dofs, yx0_dofs, yx1_dofs, zx0_dofs, zx1_dofs = (
+    # += Locate subdomain dofs
+    # xx0_dofs, xx1_dofs, yx0_dofs, yx1_dofs, zx0_dofs, zx1_dofs = (
+    #     locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
+    #     locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
+    #     locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
+    #     locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
+    #     locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
+    #     locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
+    # )
+    # += Locate subdomain dofs
+    xx0_dofs, xx1_dofs = (
         locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
         locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
-        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
-        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
-        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
-        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
     )
-
-    # +==+ Interpolate 
-    uxx0, uxx1, uyx0, uyx1, uzx0, uzx1 = (
-        Function(Vx), Function(Vx), Function(Vy), Function(Vy), Function(Vz), Function(Vz)
-    )
+    # += Interpolate 
+    # uxx0, uxx1, uyx0, uyx1, uzx0, uzx1 = (
+    #     Function(Vx), Function(Vx), Function(Vy), Function(Vy), Function(Vz), Function(Vz)
+    # )
+    uxx0, uxx1 = Function(Vx), Function(Vx)
+    # uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
+    # uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    # uyx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    # uyx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    # uzx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    # uzx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
     uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
     uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-    uyx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-    uyx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-    uzx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-    uzx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-
-    # +==+ Dirichlet Boundary Conditions
+    # += Dirichlet Boundary Conditions
+    # bc_UxX0 = dirichletbc(value=uxx0, dofs=xx0_dofs, V=mix_vs.sub(0).sub(X))
+    # bc_UxX1 = dirichletbc(value=uxx1, dofs=xx1_dofs, V=mix_vs.sub(0).sub(X))
+    # bc_UyX0 = dirichletbc(value=uyx0, dofs=yx0_dofs, V=mix_vs.sub(0).sub(Y))
+    # bc_UyX1 = dirichletbc(value=uyx1, dofs=yx1_dofs, V=mix_vs.sub(0).sub(Y))
+    # bc_UzX0 = dirichletbc(value=uzx0, dofs=zx0_dofs, V=mix_vs.sub(0).sub(Z))
+    # bc_UzX1 = dirichletbc(value=uzx1, dofs=zx1_dofs, V=mix_vs.sub(0).sub(Z))
     bc_UxX0 = dirichletbc(value=uxx0, dofs=xx0_dofs, V=mix_vs.sub(0).sub(X))
     bc_UxX1 = dirichletbc(value=uxx1, dofs=xx1_dofs, V=mix_vs.sub(0).sub(X))
-    bc_UyX0 = dirichletbc(value=uyx0, dofs=yx0_dofs, V=mix_vs.sub(0).sub(Y))
-    bc_UyX1 = dirichletbc(value=uyx1, dofs=yx1_dofs, V=mix_vs.sub(0).sub(Y))
-    bc_UzX0 = dirichletbc(value=uzx0, dofs=zx0_dofs, V=mix_vs.sub(0).sub(Z))
-    bc_UzX1 = dirichletbc(value=uzx1, dofs=zx1_dofs, V=mix_vs.sub(0).sub(Z))
     # += Assign
-    bc = [bc_UxX0, bc_UxX1, bc_UyX0, bc_UyX1, bc_UzX0, bc_UzX1]
-    # bc = [bc_UxX0, bc_UxX1, bc_UyX0, bc_UyX1]
+    # bc = [bc_UxX0, bc_UxX1, bc_UyX0, bc_UyX1, bc_UzX0, bc_UzX1]
+    bc = [bc_UxX0, bc_UxX1]
 
     return bc
 
@@ -233,7 +241,7 @@ def fx_(tnm, file, tg_c, tg_s, depth):
             mass += wei
         # += Compute weighted value
         wei_ang = mass_ang / mass if mass != 0 else 0
-        return wei_ang - H_ROT
+        return wei_ang
 
     ang_df = prop_csv(tnm, depth)
     for i in range(len(azi.x.array[:])):
@@ -388,6 +396,14 @@ def msh_(tnm, msh, depth):
     EL_TAGS[5] += 1
     gmsh.model.occ.synchronize()
 
+    # += Add points of interest
+    pts = [[*LOCS_COM[0]], [EDGE[0]/2, LOCS_COM[0][1], LOCS_COM[0][2]], [*LOCS_COM[1]]]
+    for i, (x, y, z) in enumerate(pts):
+        pt = gmsh.model.occ.add_point(x=x, y=y, z=z, tag=int(PY_TAGS[0]))
+        PY_TAGS[0] += 1
+        gmsh.model.add_physical_group(dim=1, tags=[pt], tag=SCREW_AXIS[i][1], name=SCREW_AXIS[i][0])
+        gmsh.model.occ.synchronize()
+
     # +==+ Generate physical groups
     for i in range(0, DIM+1, 1):
         # += Generate mass, com and tag data
@@ -402,6 +418,9 @@ def msh_(tnm, msh, depth):
         df = pd.DataFrame(data).transpose().sort_values(by=[0], ascending=False)
         # += Generate physical groups 
         for n, (j, row) in enumerate(df.iterrows()):
+            if i == 1:
+                print(df)
+                print(row[1])
             # += If of Dimension 2 find the Z-Discs from centroid data
             if i == DIM - 1:
                 gmsh.model.add_physical_group(
@@ -413,7 +432,12 @@ def msh_(tnm, msh, depth):
                 gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]), name="Cytosol")
                 TG_C[DIM].append(int(PY_TAGS[i]))
             # += Any other region can be arbitrarily labeled 
-            else: 
+            if i == DIM-2: 
+                com = [*row[i]]
+                if [*row[i]] in pts:
+                    l = np.where(np.fromstring(row[i].strip('()'), sep=',') in pts)
+                    gmsh.model.add_physical_group(dim=1, tags=[pt], tag=SCREW_AXIS[l][1], name=SCREW_AXIS[l][0])
+                    continue
                 gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]))
             PY_TAGS[i] += 1
         gmsh.model.occ.synchronize()
@@ -424,7 +448,7 @@ def msh_(tnm, msh, depth):
     gmsh.model.mesh.setOrder(order=ORDER) 
 
     # +==+ Write File
-    file = os.path.dirname(os.path.abspath(__file__)) + "/_msh/" + "EMSimCube" + ".msh"
+    file = os.path.dirname(os.path.abspath(__file__)) + "/_msh/" + "EMSimCube_ScrewAxis" + ".msh"
     gmsh.write(file)
     gmsh.finalize()
     return file, TG_S, TG_C
@@ -459,10 +483,10 @@ if __name__ == '__main__':
     # args = parser.parse_args()
     # tnm = args.test_name
     # msh = args.auto_mesh
-    msh = False
+    msh = True
     emf = "raw_0"
     ceq = "GC"
-    dsp = "20"
+    dsp = "10"
     etp = "dir_ani"
     tnm = "_".join([emf, ceq, dsp, etp])
     # += Run
