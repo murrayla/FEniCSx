@@ -38,8 +38,8 @@ H_ROT = 0.91755
 X, Y, Z = 0, 1, 2
 # CONSTIT_CYT = [0.5]
 CONSTIT_CYT = [1]
-CONSTIT_MYO = [1, 1, 0.5, 0.5]
-# CONSTIT_MYO = [1, 1, 1, 1]
+# CONSTIT_MYO = [1, 1, 0.5, 0.5]
+CONSTIT_MYO = [1, 1, 1, 1]
 PXLS = {"x": 11, "y": 11, "z": 50}
 CUBE = {"x": 1024, "y": 1024, "z": 80}
 SURF_NAMES = ["x0", "x1", "y0", "y1", "z0", "z1"]
@@ -193,10 +193,12 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # += [CURRENT]
     mx = Function(Mxs)
     u, p = ufl.split(mx)
+    
     # += Initial
     # +==+ Curvilinear setup
     x = ufl.SpatialCoordinate(domain)
     x_n = Function(V)
+    # k = x_n.function_space.tabulate_dof_coordinates()
     # x_n_vals = x_n.interpolate(lambda x: x)
     # print(x_n_vals)
     azi, ele = Function(Vx), Function(Vy)
@@ -231,19 +233,21 @@ def fx_(tnm, file, tg_c, tg_s, depth):
             mass += wei
         # += Compute weighted value
         wei_ang = mass_ang / mass if mass != 0 else 0
-        return wei_ang
+        return wei_ang - H_ROT
 
     ang_df = prop_csv(tnm, depth)
     for i in range(len(azi.x.array[:])):
-        # print(weighted_angle(x_n_vals[i, :], ang_df))
-        # azi.x.array[i] = weighted_angle(x[i, :], ang_df)
-        # for i in range(len(azi.x.array[:])):
-        pos = np.array(x_n.function_space.tabulate_dof_coordinates()[i])
-        print(wei_azi(pos, ang_df))
-        azi.x.array[i] = wei_azi(pos, ang_df)
-        ele.x.array[i] = wei_ele(pos, ang_df)
-        # azi.x.array[i] = 0
-        # ele.x.array[i] = 0
+        if tnm.split("_")[1] == "test":
+            azi.x.array[i] = F_0
+            ele.x.array[i] = F_0
+            continue
+        else:
+            pos = np.array(x_n.function_space.tabulate_dof_coordinates()[i])
+            azi.x.array[i] = wei_azi(pos, ang_df)
+            ele.x.array[i] = wei_ele(pos, ang_df)
+
+    # azi.x.array[:] = np.full_like(azi.x.array[:], I_0, dtype=default_scalar_type)
+    # ele.x.array[:] = np.full_like(ele.x.array[:], I_0, dtype=default_scalar_type)
 
     # x = Function(Sos)
     # Push = ufl.as_matrix([
