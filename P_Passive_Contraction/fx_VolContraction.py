@@ -270,13 +270,7 @@ def fx_(tnm, file, tg_c, tg_s, depth):
         [ufl.cos(azi), -ufl.sin(azi), 0],
         [ufl.sin(azi), ufl.cos(azi), 0],
         [0, 0, 1]
-    ])
-    # Push = ufl.as_matrix([
-    #     [1, 0, 0],
-    #     [0, 1, 0],
-    #     [0, 0, 1]
-    # ])
-    Push = Push * ufl.as_matrix([
+    ]) * ufl.as_matrix([
         [1, 0, 0],
         [0, ufl.cos(ele), -ufl.sin(ele)],
         [0, ufl.sin(ele), ufl.cos(ele)]
@@ -396,13 +390,15 @@ def msh_(tnm, msh, depth):
     EL_TAGS[5] += 1
     gmsh.model.occ.synchronize()
 
-    # += Add points of interest
-    pts = [[*LOCS_COM[0]], [EDGE[0]/2, LOCS_COM[0][1], LOCS_COM[0][2]], [*LOCS_COM[1]]]
-    for i, (x, y, z) in enumerate(pts):
-        pt = gmsh.model.occ.add_point(x=x, y=y, z=z, tag=int(PY_TAGS[0]))
-        PY_TAGS[0] += 1
-        gmsh.model.add_physical_group(dim=1, tags=[pt], tag=SCREW_AXIS[i][1], name=SCREW_AXIS[i][0])
-        gmsh.model.occ.synchronize()
+    # # += Add points of interest
+    # pts = [[*LOCS_COM[0]], [EDGE[0]/2, LOCS_COM[0][1], LOCS_COM[0][2]], [*LOCS_COM[1]]]
+    # pt_tg = []
+    # for i, (x, y, z) in enumerate(pts):
+    #     pt = gmsh.model.occ.addPoint(x=x, y=y, z=z, tag=int(EL_TAGS[5]), meshSize=0.5)
+    #     pt_tg.append(pt)
+    #     EL_TAGS[5] += 1
+    # gmsh.model.occ.synchronize()
+    # gmsh.model.mesh.embed(dim=I_, tags=pt_tg, inDim=DIM, box)
 
     # +==+ Generate physical groups
     for i in range(0, DIM+1, 1):
@@ -418,28 +414,28 @@ def msh_(tnm, msh, depth):
         df = pd.DataFrame(data).transpose().sort_values(by=[0], ascending=False)
         # += Generate physical groups 
         for n, (j, row) in enumerate(df.iterrows()):
-            if i == 1:
-                print(df)
-                print(row[1])
             # += If of Dimension 2 find the Z-Discs from centroid data
             if i == DIM - 1:
                 gmsh.model.add_physical_group(
                     dim=i, tags=[j], tag=SUR_OBJ_ASSIGN[row[1]][0], name=SUR_OBJ_ASSIGN[row[1]][1]
                 )
                 TG_C[DIM-1].append(SUR_OBJ_ASSIGN[row[1]][0])
+                continue
             # += For Dimension 3, determine if sarcomere or cytosol
             if i == DIM:
                 gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]), name="Cytosol")
                 TG_C[DIM].append(int(PY_TAGS[i]))
+                continue
             # += Any other region can be arbitrarily labeled 
-            if i == DIM-2: 
-                com = [*row[i]]
-                if [*row[i]] in pts:
-                    l = np.where(np.fromstring(row[i].strip('()'), sep=',') in pts)
-                    gmsh.model.add_physical_group(dim=1, tags=[pt], tag=SCREW_AXIS[l][1], name=SCREW_AXIS[l][0])
-                    continue
+            else: 
+                # com = [*row[1]]
+                # print(com, j)
+                # if com in pts:
+                #     l = np.where(np.fromstring(row[i].strip('()'), sep=',') in pts)
+                #     gmsh.model.add_physical_group(dim=0, tags=[j], tag=SCREW_AXIS[l][1], name=SCREW_AXIS[l][0])
+                #     continue
                 gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]))
-            PY_TAGS[i] += 1
+                PY_TAGS[i] += 1
         gmsh.model.occ.synchronize()
 
     # +==+ Generate Mesh
