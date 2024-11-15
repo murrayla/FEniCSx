@@ -66,46 +66,53 @@ EMF_PATH = "/Users/murrayla/Documents/main_PhD/P_Segmentations/myofibril_segment
 #   Outputs:
 #       numpy array of boudnary condition assignment data
 def dir_bc(mix_vs, Vx, Vy, Vz, ft, du):
-    # += Locate subdomain dofs
-    # xx0_dofs, xx1_dofs, yx0_dofs, yx1_dofs, zx0_dofs, zx1_dofs = (
+    # # += Locate subdomain dofs
+    # # += Locate subdomain dofs
+    # xx0_dofs, xx1_dofs, yx1_dofs, zx1_dofs = (
     #     locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
     #     locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
-    #     locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
     #     locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
-    #     locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
     #     locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
     # )
-    # += Locate subdomain dofs
-    xx0_dofs, xx1_dofs = (
-        locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
-        locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
-    )
-    # += Interpolate 
-    # uxx0, uxx1, uyx0, uyx1, uzx0, uzx1 = (
-    #     Function(Vx), Function(Vx), Function(Vy), Function(Vy), Function(Vz), Function(Vz)
-    # )
-    uxx0, uxx1 = Function(Vx), Function(Vx)
+    # # += Interpolate 
+    # uxx0, uxx1, uyx1, uzx1 = Function(Vx), Function(Vx), Function(Vx), Function(Vx)
     # uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
     # uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-    # uyx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
     # uyx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-    # uzx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
     # uzx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-    uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
-    uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-    # += Dirichlet Boundary Conditions
+    # # += Dirichlet Boundary Conditions
     # bc_UxX0 = dirichletbc(value=uxx0, dofs=xx0_dofs, V=mix_vs.sub(0).sub(X))
     # bc_UxX1 = dirichletbc(value=uxx1, dofs=xx1_dofs, V=mix_vs.sub(0).sub(X))
-    # bc_UyX0 = dirichletbc(value=uyx0, dofs=yx0_dofs, V=mix_vs.sub(0).sub(Y))
     # bc_UyX1 = dirichletbc(value=uyx1, dofs=yx1_dofs, V=mix_vs.sub(0).sub(Y))
-    # bc_UzX0 = dirichletbc(value=uzx0, dofs=zx0_dofs, V=mix_vs.sub(0).sub(Z))
     # bc_UzX1 = dirichletbc(value=uzx1, dofs=zx1_dofs, V=mix_vs.sub(0).sub(Z))
-    bc_UxX0 = dirichletbc(value=uxx0, dofs=xx0_dofs, V=mix_vs.sub(0).sub(X))
-    bc_UxX1 = dirichletbc(value=uxx1, dofs=xx1_dofs, V=mix_vs.sub(0).sub(X))
     # += Assign
     # bc = [bc_UxX0, bc_UxX1, bc_UyX0, bc_UyX1, bc_UzX0, bc_UzX1]
-    bc = [bc_UxX0, bc_UxX1]
-
+    # += Locate subdomain dofs
+    xx0_dofs, xx1_dofs, yx0_dofs, yx1_dofs, zx0_dofs, zx1_dofs = (
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
+    )
+    # += Interpolate 
+    uxx0, uxx1, uyx0, uyx1, uzx0, uzx1 = Function(Vx), Function(Vx), Function(Vx), Function(Vx), Function(Vx), Function(Vx)
+    uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
+    uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    uyx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    uyx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    uzx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    uzx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    # += Dirichlet Boundary Conditions
+    bc_UxX0 = dirichletbc(value=uxx0, dofs=xx0_dofs, V=mix_vs.sub(0).sub(X))
+    bc_UxX1 = dirichletbc(value=uxx1, dofs=xx1_dofs, V=mix_vs.sub(0).sub(X))
+    bc_UyX0 = dirichletbc(value=uyx0, dofs=yx0_dofs, V=mix_vs.sub(0).sub(Y))
+    bc_UyX1 = dirichletbc(value=uyx1, dofs=yx1_dofs, V=mix_vs.sub(0).sub(Y))
+    bc_UzX0 = dirichletbc(value=uzx0, dofs=zx0_dofs, V=mix_vs.sub(0).sub(Z))
+    bc_UzX1 = dirichletbc(value=uzx1, dofs=zx1_dofs, V=mix_vs.sub(0).sub(Z))
+    # += Assign
+    bc = [bc_UxX0, bc_UxX1, bc_UyX0, bc_UyX1, bc_UzX0, bc_UzX1]
     return bc
 
 # +==+==+==+
@@ -391,7 +398,8 @@ def msh_(tnm, msh, depth):
     gmsh.model.occ.synchronize()
 
     # # += Add points of interest
-    # pts = [[*LOCS_COM[0]], [EDGE[0]/2, LOCS_COM[0][1], LOCS_COM[0][2]], [*LOCS_COM[1]]]
+    pts = [[*LOCS_COM[0]], [EDGE[0]/2, LOCS_COM[0][1], LOCS_COM[0][2]], [*LOCS_COM[1]]]
+    print(pts)
     # pt_tg = []
     # for i, (x, y, z) in enumerate(pts):
     #     pt = gmsh.model.occ.addPoint(x=x, y=y, z=z, tag=int(EL_TAGS[5]), meshSize=0.5)
@@ -480,12 +488,24 @@ if __name__ == '__main__':
     # tnm = args.test_name
     # msh = args.auto_mesh
     msh = True
-    emf = "raw_0"
-    ceq = "GC"
-    dsp = "10"
-    etp = "dir_ani"
-    tnm = "_".join([emf, ceq, dsp, etp])
-    # += Run
-    print("\t" * depth + "!! BEGIN TEST: " + tnm + " !!")
-    main(tnm, msh, depth)
-    print("\t" * depth + "!! END TEST: " + tnm + " !!")
+    emfs = ["raw_" + x for x in ["test", "0", "1", "5", "6", "8"]]
+    success = []
+    failed = []
+    for emf in emfs:
+        ceq = "GC"
+        dsp = "20"
+        etp = "dir_ani"
+        tnm = "_".join([emf, ceq, dsp, etp])
+        # += Run
+        print("\t" * depth + "!! BEGIN TEST: " + tnm + " !!")
+        try:
+            main(tnm, msh, depth)
+            success.append(emf)
+            print("\t" * depth + "!! TEST PASS: " + tnm + " !!")
+        except:
+            print("\t" * depth + "!! TEST FAIL: " + tnm + " !!")
+            failed.append(emf)
+            continue
+    print("\t" * depth + "!! END !!") 
+    print("\t" * depth + " ~> Pass: {}".format(success))
+    print("\t" * depth + " ~> Fail: {}".format(failed))
