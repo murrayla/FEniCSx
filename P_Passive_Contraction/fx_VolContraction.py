@@ -10,7 +10,7 @@
 # +==+==+==+
 # Setup
 # += Imports
-from dolfinx import io,  default_scalar_type
+from dolfinx import log, io,  default_scalar_type
 from dolfinx.fem import Function, FunctionSpace, dirichletbc, locate_dofs_topological, Constant, Expression
 from dolfinx.mesh import locate_entities, meshtags
 from dolfinx.fem.petsc import NonlinearProblem
@@ -35,11 +35,12 @@ ZDISC = 5
 ORDER = 2
 QUADRATURE = 4
 H_ROT = 0.91755
+E_ROT = -1.08994
 X, Y, Z = 0, 1, 2
 # CONSTIT_CYT = [0.5]
-CONSTIT_CYT = [1]
-# CONSTIT_MYO = [1, 1, 0.5, 0.5]
+# CONSTIT_CYT = [1]
 CONSTIT_MYO = [1, 1, 1, 1]
+# CONSTIT_MYO = [1, 1, 1, 1]
 PXLS = {"x": 11, "y": 11, "z": 50}
 CUBE = {"x": 1024, "y": 1024, "z": 80}
 SURF_NAMES = ["x0", "x1", "y0", "y1", "z0", "z1"]
@@ -65,28 +66,7 @@ EMF_PATH = "/Users/murrayla/Documents/main_PhD/P_Segmentations/myofibril_segment
 #       du | float | displacement value
 #   Outputs:
 #       numpy array of boudnary condition assignment data
-def dir_bc(mix_vs, Vx, Vy, Vz, ft, du):
-    # # += Locate subdomain dofs
-    # # += Locate subdomain dofs
-    # xx0_dofs, xx1_dofs, yx1_dofs, zx1_dofs = (
-    #     locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
-    #     locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
-    #     locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
-    #     locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
-    # )
-    # # += Interpolate 
-    # uxx0, uxx1, uyx1, uzx1 = Function(Vx), Function(Vx), Function(Vx), Function(Vx)
-    # uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
-    # uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-    # uyx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-    # uzx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-    # # += Dirichlet Boundary Conditions
-    # bc_UxX0 = dirichletbc(value=uxx0, dofs=xx0_dofs, V=mix_vs.sub(0).sub(X))
-    # bc_UxX1 = dirichletbc(value=uxx1, dofs=xx1_dofs, V=mix_vs.sub(0).sub(X))
-    # bc_UyX1 = dirichletbc(value=uyx1, dofs=yx1_dofs, V=mix_vs.sub(0).sub(Y))
-    # bc_UzX1 = dirichletbc(value=uzx1, dofs=zx1_dofs, V=mix_vs.sub(0).sub(Z))
-    # += Assign
-    # bc = [bc_UxX0, bc_UxX1, bc_UyX0, bc_UyX1, bc_UzX0, bc_UzX1]
+def dir_bc(mix_vs, Vx, Vy, Vz, ft, uni, du):
     # += Locate subdomain dofs
     xx0_dofs, xx1_dofs, yx0_dofs, yx1_dofs, zx0_dofs, zx1_dofs = (
         locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
@@ -98,8 +78,12 @@ def dir_bc(mix_vs, Vx, Vy, Vz, ft, du):
     )
     # += Interpolate 
     uxx0, uxx1, uyx0, uyx1, uzx0, uzx1 = Function(Vx), Function(Vx), Function(Vx), Function(Vx), Function(Vx), Function(Vx)
-    uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
-    uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    if uni:
+        uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
+        uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    else:
+        uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du//2)))
+        uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-du//2)))
     uyx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
     uyx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
     uzx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
@@ -183,25 +167,15 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     
     # +==+ Boundary Conditions
     print("\t" * depth + "+= Assign Boundary Conditions")
-    bc = dir_bc(Mxs, Vx, Vy, Vz, ft, EDGE[0] * int(tnm.split("_")[3])/100)
+    bc = dir_bc(Mxs, Vx, Vy, Vz, ft, tnm.split("_")[-1] == "x1c", EDGE[0] * int(tnm.split("_")[3])/100)
     
     # +==+ Create rotation and material property arrays
     print("\t" * depth + "+= Assign Fibre Directions")
     # += 1-DF Spaces
-    fbr_azi, fbr_elv, fbr_con = Function(Dcs), Function(Dcs), Function(Dcs)
+    myo = Function(Dcs)
     cyt_tgs = ct.find(tg_c[DIM][0])
     # += Cytosol [DEFAULT]
-    # fbr_azi.x.array[:] = np.full_like(fbr_azi.x.array[:], I_0, dtype=default_scalar_type)
-    # fbr_con.x.array[:] = np.full_like(fbr_azi.x.array[:], CONSTIT_CYT[0], dtype=default_scalar_type)
-    fbr_azi.x.array[cyt_tgs] = np.full_like(cyt_tgs, I_0, dtype=default_scalar_type)
-    fbr_elv.x.array[cyt_tgs] = np.full_like(cyt_tgs, I_0, dtype=default_scalar_type)
-    fbr_con.x.array[cyt_tgs] = np.full_like(cyt_tgs, CONSTIT_CYT[0], dtype=default_scalar_type)
-    # += For each other orientation assign arrays
-    # for i in range(0, len(tg_s[DIM]["tag"]), 1):
-    #     myo_tgs = ct.find(tg_s[DIM]["tag"][i])
-    #     fbr_azi.x.array[myo_tgs] = np.full_like(myo_tgs, tg_s[DIM]["angles"][i][0], dtype=default_scalar_type)
-    #     fbr_elv.x.array[myo_tgs] = np.full_like(myo_tgs, tg_s[DIM]["angles"][i][1], dtype=default_scalar_type)
-    #     fbr_con.x.array[myo_tgs] = np.full_like(myo_tgs, CONSTIT_MYO[1], dtype=default_scalar_type)
+    myo.x.array[cyt_tgs] = np.full_like(cyt_tgs, CONSTIT_MYO[0], dtype=default_scalar_type)
 
     # +==+ Variables
     v, q = ufl.TestFunctions(Mxs)
@@ -213,43 +187,38 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # +==+ Curvilinear setup
     x = ufl.SpatialCoordinate(domain)
     x_n = Function(V)
-    # k = x_n.function_space.tabulate_dof_coordinates()
-    # x_n_vals = x_n.interpolate(lambda x: x)
-    # print(x_n_vals)
-    azi, ele = Function(Vx), Function(Vy)
+    azi, ele, con = Function(Vx), Function(Vy), Function(Vz)
 
-    def wei_azi(pos, df):
-        mass_ang, mass = 0, 0
-        for _, row in df.iterrows():
-            # += Get position and angle
-            cur = np.fromstring(row["Centroid"].strip('()'), sep=',')
-            ang = row["Orientation [RAD]"]
-            # += Euclidean distance
-            dis = np.linalg.norm(pos - cur)
-            # += Weight
-            wei = 1 / (dis + 1e-10)
-            mass_ang += ang * wei
-            mass += wei
-        # += Compute weighted value
-        wei_ang = mass_ang / mass if mass != 0 else 0
-        return wei_ang - H_ROT
-    
-    def wei_ele(pos, df):
-        mass_ang, mass = 0, 0
-        for _, row in df.iterrows():
-            # += Get position and angle
-            cur = np.fromstring(row["Centroid"].strip('()'), sep=',')
-            ang = row["Elevation Orientation [RAD]"]
-            # += Euclidean distance
-            dis = np.linalg.norm(pos - cur)
-            # += Weight
-            wei = 1 / (dis + 1e-10)
-            mass_ang += ang * wei
-            mass += wei
-        # += Compute weighted value
-        wei_ang = mass_ang / mass if mass != 0 else 0
-        return wei_ang
+    def wei_ang(pos, ang_type, df):
+        cur = np.array([np.fromstring(row["Centroid"].strip('()'), sep=',') for _, row in df.iterrows()])
+        for i, x in enumerate(["x", "y", "z"]):
+            cur[:, i] = cur[:, i] * PXLS[x]
+        ang = np.array(
+            [row["Orientation [RAD]"] - H_ROT if not ang_type else row["Elevation Orientation [RAD]"] - E_ROT for _, row in df.iterrows()]
+        )
+        dis = np.linalg.norm(cur - pos, axis=1)
+        mask = dis <= 500
+        filt_dis = dis[mask]
+        filt_ang = ang[mask]
 
+        if len(filt_dis) == 0:
+            return 0
+
+        wei = 1 / (filt_dis + 1e-10)
+        wei_ang = np.sum(filt_ang * wei) / np.sum(wei)
+
+        # Adjust based on ang_type
+        if not ang_type:
+            if (abs(wei_ang) > 1.3 * abs(H_ROT)) or (abs(wei_ang - H_ROT) < 0.7 * abs(H_ROT)):
+                return F_0
+            else:
+                return wei_ang
+        else:
+            if (abs(wei_ang - E_ROT) > 1.3 * abs(E_ROT)) or (abs(wei_ang - E_ROT) < 0.7 * abs(E_ROT)):
+                return F_0
+            else:
+                return wei_ang
+            
     ang_df = prop_csv(tnm, depth)
     for i in range(len(azi.x.array[:])):
         if tnm.split("_")[1] == "test":
@@ -258,19 +227,9 @@ def fx_(tnm, file, tg_c, tg_s, depth):
             continue
         else:
             pos = np.array(x_n.function_space.tabulate_dof_coordinates()[i])
-            azi.x.array[i] = wei_azi(pos, ang_df)
-            ele.x.array[i] = wei_ele(pos, ang_df)
+            azi.x.array[i] = wei_ang(pos, 0, ang_df)
+            ele.x.array[i] = wei_ang(pos, 1, ang_df)    
 
-    # azi.x.array[:] = np.full_like(azi.x.array[:], I_0, dtype=default_scalar_type)
-    # ele.x.array[:] = np.full_like(ele.x.array[:], I_0, dtype=default_scalar_type)
-
-    # x = Function(Sos)
-    # Push = ufl.as_matrix([
-    #     [ufl.cos(fbr_azi), -ufl.sin(fbr_azi), 0],
-    #     [ufl.sin(fbr_azi), ufl.cos(fbr_azi), 0],
-    #     [0, 0, 1]
-    # ])
-    # x.interpolate(lambda x: (x[0], x[1], x[2]))
     i, j, k, a, b = ufl.indices(5)
     # # += Curvilinear mapping dependent on subdomain values
     Push = ufl.as_matrix([
@@ -282,18 +241,15 @@ def fx_(tnm, file, tg_c, tg_s, depth):
         [0, ufl.cos(ele), -ufl.sin(ele)],
         [0, ufl.sin(ele), ufl.cos(ele)]
     ])
-
     # += Subdomain dependent rotations of displacement and coordinates
     x_nu = ufl.inv(Push) * x
     u_nu = ufl.inv(Push) * u
     nu = ufl.inv(Push) * (x + u_nu)
-
     # += Metric tensors
     Z_co = ufl.grad(x_nu).T * ufl.grad(x_nu)
     Z_ct = ufl.inv(Z_co)
     z_co = ufl.grad(nu).T * ufl.grad(nu)
     z_ct = ufl.inv(z_co)
-
     # += Christoffel Symbol | Γ^{i}_{j, a}
     gamma = ufl.as_tensor((
         0.5 * Z_ct[k, a] * (
@@ -302,22 +258,20 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     ), [k, i, j])
     # += Covariant Derivative
     covDev = ufl.grad(v) - ufl.as_tensor(v[k]*gamma[k, i, j], [i, j])
-
     # += Kinematics variables
     I = ufl.variable(ufl.Identity(DIM))
     F = ufl.as_tensor(I[i, j] + ufl.grad(u_nu)[i, j], [i, j]) * Push
     C = ufl.variable(ufl.as_tensor(F[k, i]*F[k, j], [i, j]))
     E = ufl.variable(ufl.as_tensor((0.5*(z_co[i,j] - Z_co[i,j])), [i, j]))
     J = ufl.variable(ufl.det(F))
-
     # += Material Setup | Guccione
     Q = (
-        fbr_con * E[0,0]**2 + 
+        CONSTIT_MYO[1] * E[0,0]**2 + 
         CONSTIT_MYO[2] * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
         CONSTIT_MYO[3] * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
     )
     piola = CONSTIT_MYO[0]/2 * ufl.exp(Q) * ufl.as_matrix([
-        [4*fbr_con*E[0,0], 2*CONSTIT_MYO[3]*(E[1,0] + E[0,1]), 2*CONSTIT_MYO[3]*(E[2,0] + E[0,2])],
+        [4*CONSTIT_MYO[1]*E[0,0], 2*CONSTIT_MYO[3]*(E[1,0] + E[0,1]), 2*CONSTIT_MYO[3]*(E[2,0] + E[0,2])],
         [2*CONSTIT_MYO[3]*(E[0,1] + E[1,0]), 4*CONSTIT_MYO[2]*E[1,1], 2*CONSTIT_MYO[2]*(E[2,1] + E[1,2])],
         [2*CONSTIT_MYO[3]*(E[0,2] + E[2,0]), 2*CONSTIT_MYO[2]*(E[1,2] + E[2,1]), 4*CONSTIT_MYO[3]*E[2,2]],
     ]) - p * Z_co
@@ -330,17 +284,22 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     # += Residual equation
     R = term * dx + q * (J - 1) * dx
 
+    # += Data functions for exporting with setup
     Vu_sol, up_to_u_sol = Mxs.sub(0).collapse() 
-    u_sol = Function(Vu_sol) 
-
-    Vp_sol, up_to_p_sol = Mxs.sub(1).collapse() 
-    p_sol = Function(Vp_sol) 
-
-    u_sol.name = "disp"
-    p_sol.name = "pressure"
-
-    file = os.path.dirname(os.path.abspath(__file__)) + "/_bp/" + tnm + ".bp"
-    eps_file = io.VTXWriter(MPI.COMM_WORLD, file, u_sol, engine="BP4")
+    dis = Function(Vu_sol) 
+    sig = Function(Tes)
+    eps = Function(Tes)
+    # += Label Functions
+    dis.name = "U - Displacement"
+    eps.name = "E - Green Strain"
+    sig.name = "S - Cauchy Stress"
+    # += File setup
+    file = os.path.dirname(os.path.abspath(__file__)) + "/_bp/" + tnm
+    dis_file = io.VTXWriter(MPI.COMM_WORLD, file + "_DIS" + ".bp", dis, engine="BP4")
+    azi_file = io.VTXWriter(MPI.COMM_WORLD, file + "_AZI" + ".bp", azi, engine="BP4")
+    ele_file = io.VTXWriter(MPI.COMM_WORLD, file + "_ELE" + ".bp", ele, engine="BP4")
+    sig_file = io.VTXWriter(MPI.COMM_WORLD, file + "_SIG" + ".bp", sig, engine="BP4")
+    eps_file = io.VTXWriter(MPI.COMM_WORLD, file + "_EPS" + ".bp", eps, engine="BP4")
     
     # += Nonlinear Solver
     problem = NonlinearProblem(R, mx, bc)
@@ -348,6 +307,61 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     solver.atol = 1e-8
     solver.rtol = 1e-8
     solver.convergence_criterion = "incremental"
+
+    # +==+ Setup stress output
+    def cauchy_tensor(u, p, x, azi, ele, myo):
+        i, j, k, a, b = ufl.indices(5)
+        # # += Curvilinear mapping dependent on subdomain values
+        Push = ufl.as_matrix([
+            [ufl.cos(azi), -ufl.sin(azi), 0],
+            [ufl.sin(azi), ufl.cos(azi), 0],
+            [0, 0, 1]
+        ]) * ufl.as_matrix([
+            [1, 0, 0],
+            [0, ufl.cos(ele), -ufl.sin(ele)],
+            [0, ufl.sin(ele), ufl.cos(ele)]
+        ])
+        # += Subdomain dependent rotations of displacement and coordinates
+        x_nu = ufl.inv(Push) * x
+        u_nu = ufl.inv(Push) * u
+        nu = ufl.inv(Push) * (x + u_nu)
+        # += Metric tensors
+        Z_co = ufl.grad(x_nu).T * ufl.grad(x_nu)
+        Z_ct = ufl.inv(Z_co)
+        z_co = ufl.grad(nu).T * ufl.grad(nu)
+        # += Kinematics variables
+        I = ufl.variable(ufl.Identity(DIM))
+        F = ufl.as_tensor(I[i, j] + ufl.grad(u_nu)[i, j], [i, j]) * Push
+        E = ufl.variable(ufl.as_tensor((0.5*(z_co[i,j] - Z_co[i,j])), [i, j]))
+        J = ufl.variable(ufl.det(F))
+        # += Material Setup | Guccione
+        Q = (
+            myo * E[0,0]**2 + 
+            CONSTIT_MYO[2] * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
+            CONSTIT_MYO[3] * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
+        )
+        piola = CONSTIT_MYO[0]/2 * ufl.exp(Q) * ufl.as_matrix([
+            [4*myo*E[0,0], 2*CONSTIT_MYO[3]*(E[1,0] + E[0,1]), 2*CONSTIT_MYO[3]*(E[2,0] + E[0,2])],
+            [2*CONSTIT_MYO[3]*(E[0,1] + E[1,0]), 4*CONSTIT_MYO[2]*E[1,1], 2*CONSTIT_MYO[2]*(E[2,1] + E[1,2])],
+            [2*CONSTIT_MYO[3]*(E[0,2] + E[2,0]), 2*CONSTIT_MYO[2]*(E[1,2] + E[2,1]), 4*CONSTIT_MYO[3]*E[2,2]],
+        ]) - p * Z_co
+        sig = 1/J * F*piola*F.T
+        return sig
+    
+    # +==+ Setup strain output
+    def green_tensor(u, p, x, azi, ele):
+        I = ufl.variable(ufl.Identity(DIM))
+        F = ufl.variable(I + ufl.grad(u))
+        C = ufl.variable(F.T * F)
+        E = ufl.variable(0.5*(C-I))
+        eps = ufl.as_tensor([
+            [E[0, 0], E[0, 1], E[0, 2]], 
+            [E[1, 0], E[1, 1], E[1, 2]], 
+            [E[2, 0], E[2, 1], E[2, 2]]
+        ])
+        return eps
+    
+    log.set_log_level(log.LogLevel.INFO)
 
     # +==+==+
     # Solution and Output
@@ -358,11 +372,33 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     else:
         print(f"Not converged after {num_its} iterations.")
 
+    # += Evaluate values
     u_eval = mx.sub(0).collapse()
-    u_sol.interpolate(u_eval)
+    p_eval = mx.sub(1).collapse()
+    dis.interpolate(u_eval)
+    # += Setup tensor space for stress tensor interpolation
+    cauchy = Expression(
+        e=cauchy_tensor(u_eval, p_eval, x, azi, ele, myo), 
+        X=Tes.element.interpolation_points()
+    )
+    epsilon = Expression(
+        e=green_tensor(u_eval, p_eval, x, azi, ele), 
+        X=Tes.element.interpolation_points()
+    )
+    sig.interpolate(cauchy)
+    eps.interpolate(epsilon)
 
+    # += Write files
+    dis_file.write(0)
+    azi_file.write(0)
+    ele_file.write(0)
+    sig_file.write(0)
     eps_file.write(0)
-
+    # += Close files
+    dis_file.close()
+    azi_file.close()
+    ele_file.close()
+    sig_file.close()
     eps_file.close()
 
     return None
@@ -397,17 +433,6 @@ def msh_(tnm, msh, depth):
     EL_TAGS[5] += 1
     gmsh.model.occ.synchronize()
 
-    # # += Add points of interest
-    pts = [[*LOCS_COM[0]], [EDGE[0]/2, LOCS_COM[0][1], LOCS_COM[0][2]], [*LOCS_COM[1]]]
-    print(pts)
-    # pt_tg = []
-    # for i, (x, y, z) in enumerate(pts):
-    #     pt = gmsh.model.occ.addPoint(x=x, y=y, z=z, tag=int(EL_TAGS[5]), meshSize=0.5)
-    #     pt_tg.append(pt)
-    #     EL_TAGS[5] += 1
-    # gmsh.model.occ.synchronize()
-    # gmsh.model.mesh.embed(dim=I_, tags=pt_tg, inDim=DIM, box)
-
     # +==+ Generate physical groups
     for i in range(0, DIM+1, 1):
         # += Generate mass, com and tag data
@@ -436,12 +461,6 @@ def msh_(tnm, msh, depth):
                 continue
             # += Any other region can be arbitrarily labeled 
             else: 
-                # com = [*row[1]]
-                # print(com, j)
-                # if com in pts:
-                #     l = np.where(np.fromstring(row[i].strip('()'), sep=',') in pts)
-                #     gmsh.model.add_physical_group(dim=0, tags=[j], tag=SCREW_AXIS[l][1], name=SCREW_AXIS[l][0])
-                #     continue
                 gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]))
                 PY_TAGS[i] += 1
         gmsh.model.occ.synchronize()
@@ -479,33 +498,28 @@ def main(tnm, msh, depth):
 # +==+==+ Main Check
 if __name__ == '__main__':
     depth = 0
-    # +==+ Argument Parser
-    # += Create parser for taking in input values
-    # parser = argparse.ArgumentParser(description="3D FEniCSx Passive Contractio Model")
-    # parser.add_argument('test_name', type=str, help="Test name")
-    # parser.add_argument('auto_mesh', type=bool, help="True/False for Mesh auto generation")
-    # args = parser.parse_args()
-    # tnm = args.test_name
-    # msh = args.auto_mesh
-    msh = True
-    emfs = ["raw_" + x for x in ["test", "0", "1", "5", "6", "8"]]
+    # += Arguments
+    msh = False
+    emfs = ["raw_" + x for x in ["test", "0", "1", "6", "8"]]
+    emfs = ["raw_0"]
     success = []
     failed = []
     for emf in emfs:
         ceq = "GC"
-        dsp = "20"
-        etp = "dir_ani"
+        dsp = "01"
+        etp = "dir_ani_x1x0c"
         tnm = "_".join([emf, ceq, dsp, etp])
         # += Run
         print("\t" * depth + "!! BEGIN TEST: " + tnm + " !!")
-        try:
-            main(tnm, msh, depth)
-            success.append(emf)
-            print("\t" * depth + "!! TEST PASS: " + tnm + " !!")
-        except:
-            print("\t" * depth + "!! TEST FAIL: " + tnm + " !!")
-            failed.append(emf)
-            continue
+        main(tnm, msh, depth) 
+        # try:
+        #     main(tnm, msh, depth)
+        #     success.append(emf)
+        #     print("\t" * depth + "!! TEST PASS: " + tnm + " !!")
+        # except:
+        #     print("\t" * depth + "!! TEST FAIL: " + tnm + " !!")
+        #     failed.append(emf)
+        #     continue
     print("\t" * depth + "!! END !!") 
     print("\t" * depth + " ~> Pass: {}".format(success))
     print("\t" * depth + " ~> Fail: {}".format(failed))
