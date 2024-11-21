@@ -10,11 +10,12 @@
 # +==+==+==+
 # Setup
 # += Imports
-from dolfinx import log, io,  default_scalar_type
-from dolfinx.fem import Function, FunctionSpace, dirichletbc, locate_dofs_topological, Constant, Expression
-from dolfinx.mesh import locate_entities, meshtags
+from dolfinx import log, io,  default_scalar_type 
+from dolfinx.fem import Function, FunctionSpace, dirichletbc, locate_dofs_topological, Constant, Expression, DirichletBC
+from dolfinx.mesh import locate_entities, locate_entities_boundary, meshtags
 from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
+from scipy.spatial import cKDTree
 from mpi4py import MPI
 import operator as op
 import pandas as pd
@@ -22,6 +23,7 @@ import numpy as np
 import argparse
 import basix
 import gmsh
+import math
 import ufl
 import csv
 import os
@@ -77,7 +79,7 @@ def dir_bc(mix_vs, Vx, Vy, Vz, ft, uni, du):
         locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
     )
     # += Interpolate 
-    uxx0, uxx1, uyx0, uyx1, uzx0, uzx1 = Function(Vx), Function(Vx), Function(Vx), Function(Vx), Function(Vx), Function(Vx)
+    uxx0, uxx1, uyx0, uyx1, uzx0, uzx1 = Function(Vx), Function(Vx), Function(Vy), Function(Vy), Function(Vz), Function(Vz)
     if uni:
         uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
         uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
@@ -97,6 +99,141 @@ def dir_bc(mix_vs, Vx, Vy, Vz, ft, uni, du):
     bc_UzX1 = dirichletbc(value=uzx1, dofs=zx1_dofs, V=mix_vs.sub(0).sub(Z))
     # += Assign
     bc = [bc_UxX0, bc_UxX1, bc_UyX0, bc_UyX1, bc_UzX0, bc_UzX1]
+    # bc = [bc_UxX1 ,bc_UyX0, bc_UyX1, bc_UzX0, bc_UzX1]
+    return bc
+
+def dir_corner_prescribe_bc(mix_vs, Vx, Vy, Vz, ft, uni, du):
+    # += Locate subdomain dofs
+    xx0_dofs, xx1_dofs = (
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"])),
+    )
+    yx0y0z0_dofs, yx1y0z0_dofs, yx0y1z0_dofs, yx1y1z0_dofs, yx0y0z1_dofs, yx1y0z1_dofs, yx0y1z1_dofs, yx1y1z1_dofs = (
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=0, entities=ft.find(10)),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=0, entities=ft.find(11)),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=0, entities=ft.find(12)),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=0, entities=ft.find(13)),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=0, entities=ft.find(14)),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=0, entities=ft.find(15)),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=0, entities=ft.find(16)),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=0, entities=ft.find(17)),
+    )
+    zx0y0z0_dofs, zx1y0z0_dofs, zx0y1z0_dofs, zx1y1z0_dofs, zx0y0z1_dofs, zx1y0z1_dofs, zx0y1z1_dofs, zx1y1z1_dofs = (
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=0, entities=ft.find(10)),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=0, entities=ft.find(11)),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=0, entities=ft.find(12)),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=0, entities=ft.find(13)),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=0, entities=ft.find(14)),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=0, entities=ft.find(15)),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=0, entities=ft.find(16)),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=0, entities=ft.find(17)),
+    )
+    # += Interpolate 
+    uxx0, uxx1 = Function(Vx), Function(Vx)
+    uy, uz =  Function(Vy), Function(Vz)
+    if uni:
+        uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
+        uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    else:
+        uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du//2)))
+        uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-du//2)))
+    uy.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    uz.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    # += Dirichlet Boundary Conditions
+    bc_UxX0 = dirichletbc(value=uxx0, dofs=xx0_dofs, V=mix_vs.sub(0).sub(X))
+    bc_UxX1 = dirichletbc(value=uxx1, dofs=xx1_dofs, V=mix_vs.sub(0).sub(X))
+    
+    (
+        bc_yx0y0z0_dofs, bc_yx1y0z0_dofs, bc_yx0y1z0_dofs, bc_yx1y1z0_dofs, 
+        bc_yx0y0z1_dofs, bc_yx1y0z1_dofs, bc_yx0y1z1_dofs, bc_yx1y1z1_dofs
+    ) = (
+        dirichletbc(value=uy, dofs=yx0y0z0_dofs, V=mix_vs.sub(0).sub(Y)),
+        dirichletbc(value=uy, dofs=yx1y0z0_dofs, V=mix_vs.sub(0).sub(Y)),
+        dirichletbc(value=uy, dofs=yx0y1z0_dofs, V=mix_vs.sub(0).sub(Y)),
+        dirichletbc(value=uy, dofs=yx1y1z0_dofs, V=mix_vs.sub(0).sub(Y)),
+        dirichletbc(value=uy, dofs=yx0y0z1_dofs, V=mix_vs.sub(0).sub(Y)),
+        dirichletbc(value=uy, dofs=yx1y0z1_dofs, V=mix_vs.sub(0).sub(Y)),
+        dirichletbc(value=uy, dofs=yx0y1z1_dofs, V=mix_vs.sub(0).sub(Y)),
+        dirichletbc(value=uy, dofs=yx1y1z1_dofs, V=mix_vs.sub(0).sub(Y))
+    )
+    (
+        bc_zx0y0z0_dofs, bc_zx1y0z0_dofs, bc_zx0y1z0_dofs, bc_zx1y1z0_dofs, 
+        bc_zx0y0z1_dofs, bc_zx1y0z1_dofs, bc_zx0y1z1_dofs, bc_zx1y1z1_dofs
+    ) = (
+        dirichletbc(value=uz, dofs=zx0y0z0_dofs, V=mix_vs.sub(0).sub(Z)),
+        dirichletbc(value=uz, dofs=zx1y0z0_dofs, V=mix_vs.sub(0).sub(Z)),
+        dirichletbc(value=uz, dofs=zx0y1z0_dofs, V=mix_vs.sub(0).sub(Z)),
+        dirichletbc(value=uz, dofs=zx1y1z0_dofs, V=mix_vs.sub(0).sub(Z)),
+        dirichletbc(value=uz, dofs=zx0y0z1_dofs, V=mix_vs.sub(0).sub(Z)),
+        dirichletbc(value=uz, dofs=zx1y0z1_dofs, V=mix_vs.sub(0).sub(Z)),
+        dirichletbc(value=uz, dofs=zx0y1z1_dofs, V=mix_vs.sub(0).sub(Z)),
+        dirichletbc(value=uz, dofs=zx1y1z1_dofs, V=mix_vs.sub(0).sub(Z))
+    )
+    # += Assign
+    bc = [
+        bc_UxX0, bc_UxX1,
+        bc_yx0y0z0_dofs, bc_yx1y0z0_dofs, bc_yx0y1z0_dofs, bc_yx1y1z0_dofs, 
+        bc_yx0y0z1_dofs, bc_yx1y0z1_dofs, bc_yx0y1z1_dofs, bc_yx1y1z1_dofs,
+        bc_zx0y0z0_dofs, bc_zx1y0z0_dofs, bc_zx0y1z0_dofs, bc_zx1y1z0_dofs, 
+        bc_zx0y0z1_dofs, bc_zx1y0z1_dofs, bc_zx0y1z1_dofs, bc_zx1y1z1_dofs]
+    # bc = [bc_UxX0, bc_UxX1]
+    return bc
+
+def dir_corner_bc(domain, mix_vs, Vx, Vy, Vz, ft, uni, du):
+    # += Locate subdomain dofs
+    xx0_dofs, xx1_dofs = (
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x0"])),
+        locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=ft.find(SUR_OBJ_TAGS["x1"]))
+    )
+    def corner(x):
+        return (
+            np.isclose(x[0], min(x[0])) & 
+            (
+                np.isclose(x[1], min(x[1])) & np.isclose(x[2], min(x[2])) | 
+                np.isclose(x[1], max(x[1])) & np.isclose(x[2], min(x[2])) |
+                np.isclose(x[1], min(x[1])) & np.isclose(x[2], max(x[2])) |
+                np.isclose(x[1], max(x[1])) & np.isclose(x[2], max(x[2]))
+            ) |
+            np.isclose(x[0], max(x[0])) & 
+            (
+                np.isclose(x[1], min(x[1])) & np.isclose(x[2], min(x[2])) | 
+                np.isclose(x[1], max(x[1])) & np.isclose(x[2], min(x[2])) |
+                np.isclose(x[1], min(x[1])) & np.isclose(x[2], max(x[2])) |
+                np.isclose(x[1], max(x[1])) & np.isclose(x[2], max(x[2]))
+            )
+        )
+    
+    def left(x):
+        print(np.logical_and(np.isclose(x[0], 0), np.isclose(x[1], 0)))
+        return np.logical_and(np.isclose(x[0], 0), np.isclose(x[1], 0))
+
+    fdim = DIM - 1
+    corner_ft = locate_entities(mesh=domain, dim=0, marker=corner)
+    # print(np.full_like(corner_ft, 10))
+    # exit()
+    mesh_corner_ft = meshtags(mesh=domain, dim=fdim, entities=corner_ft, values=np.full_like(corner_ft, 10))
+    # += Locate subdomain dofs
+    y_dofs_corner = locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=mesh_corner_ft.dim, entities=corner_ft)
+    z_dofs_corner = locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=mesh_corner_ft.dim, entities=corner_ft)
+    
+    # += Interpolate 
+    uxx0, uxx1, uycorner, uzcorner = Function(Vx), Function(Vx), Function(Vy), Function(Vz)
+    if uni:
+        uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
+        uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    else:
+        uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du//2)))
+        uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-du//2)))
+    uycorner.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    uzcorner.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    print(len(uzcorner.x.array[:]))
+    # += Dirichlet Boundary Conditions
+    bc_UxX0 = dirichletbc(value=uxx0, dofs=xx0_dofs, V=mix_vs.sub(0).sub(X))
+    bc_UxX1 = dirichletbc(value=uxx1, dofs=xx1_dofs, V=mix_vs.sub(0).sub(X))
+    bc_UyCorner = dirichletbc(value=uycorner, dofs=y_dofs_corner, V=mix_vs.sub(0).sub(Y))
+    bc_UzCorner = dirichletbc(value=uzcorner, dofs=z_dofs_corner, V=mix_vs.sub(0).sub(Z))
+    # += Assign
+    bc = [bc_UxX0, bc_UxX1, bc_UyCorner, bc_UzCorner]
     return bc
 
 # +==+==+==+
@@ -165,10 +302,6 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     Vy, dofsY = V.sub(Y).collapse()
     Vz, dofsZ = V.sub(Z).collapse()
     
-    # +==+ Boundary Conditions
-    print("\t" * depth + "+= Assign Boundary Conditions")
-    bc = dir_bc(Mxs, Vx, Vy, Vz, ft, tnm.split("_")[-1] == "x1c", EDGE[0] * int(tnm.split("_")[3])/100)
-    
     # +==+ Create rotation and material property arrays
     print("\t" * depth + "+= Assign Fibre Directions")
     # += 1-DF Spaces
@@ -193,31 +326,47 @@ def fx_(tnm, file, tg_c, tg_s, depth):
         cur = np.array([np.fromstring(row["Centroid"].strip('()'), sep=',') for _, row in df.iterrows()])
         for i, x in enumerate(["x", "y", "z"]):
             cur[:, i] = cur[:, i] * PXLS[x]
+        
         ang = np.array(
             [row["Orientation [RAD]"] - H_ROT if not ang_type else row["Elevation Orientation [RAD]"] - E_ROT for _, row in df.iterrows()]
         )
+        if not ang_type:
+            ang[ang > 0.5] = 0
+            ang[ang < -0.5] = 0
+        else:
+            ang[ang > 0.5] = 0
+            ang[ang < -0.5] = 0
         dis = np.linalg.norm(cur - pos, axis=1)
-        mask = dis <= 500
+
+        mask = dis <= 2000
         filt_dis = dis[mask]
-        filt_ang = ang[mask]
+        filt_ang = ang[mask] 
 
         if len(filt_dis) == 0:
             return 0
-
+        
         wei = 1 / (filt_dis + 1e-10)
         wei_ang = np.sum(filt_ang * wei) / np.sum(wei)
 
-        # Adjust based on ang_type
-        if not ang_type:
-            if (abs(wei_ang) > 1.3 * abs(H_ROT)) or (abs(wei_ang - H_ROT) < 0.7 * abs(H_ROT)):
-                return F_0
-            else:
-                return wei_ang
-        else:
-            if (abs(wei_ang - E_ROT) > 1.3 * abs(E_ROT)) or (abs(wei_ang - E_ROT) < 0.7 * abs(E_ROT)):
-                return F_0
-            else:
-                return wei_ang
+        # if math.isnan(wei_ang):
+        #     print("here")
+
+        return wei_ang
+
+    def gaus_smooth(crds, vals, thrs):
+        tree = cKDTree(crds)
+        s_vals = np.zeros_like(vals)
+        
+        # Iterate through each node
+        for i, xyz in enumerate(crds):
+            idx = tree.query_ball_point(xyz, thrs)
+            nei_xyz = crds[idx]
+            nei_val = vals[idx]
+            dits = np.linalg.norm(nei_xyz - xyz, axis=1)
+            weis = np.exp(-0.5 * (dits / thrs) ** 2)
+            s_vals[i] = np.sum(weis * nei_val) / np.sum(weis)
+        
+        return s_vals
             
     ang_df = prop_csv(tnm, depth)
     for i in range(len(azi.x.array[:])):
@@ -229,6 +378,21 @@ def fx_(tnm, file, tg_c, tg_s, depth):
             pos = np.array(x_n.function_space.tabulate_dof_coordinates()[i])
             azi.x.array[i] = wei_ang(pos, 0, ang_df)
             ele.x.array[i] = wei_ang(pos, 1, ang_df)    
+
+    azi.x.array[:] = gaus_smooth(np.array(x_n.function_space.tabulate_dof_coordinates()[:]), azi.x.array[:], 4000)
+    ele.x.array[:] = gaus_smooth(np.array(x_n.function_space.tabulate_dof_coordinates()[:]), ele.x.array[:], 4000)
+
+    # azi_file = io.VTXWriter(MPI.COMM_WORLD, file + "_AZI" + ".bp", azi, engine="BP4")
+    # ele_file = io.VTXWriter(MPI.COMM_WORLD, file + "_ELE" + ".bp", ele, engine="BP4")
+    # azi_file.write(0)
+    # azi_file.close()
+    # ele_file.write(0)
+    # ele_file.close()
+
+    # print(azi.x.array[:])
+    # print(ele.x.array[:])
+
+    # exit(0)
 
     i, j, k, a, b = ufl.indices(5)
     # # += Curvilinear mapping dependent on subdomain values
@@ -300,13 +464,6 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     ele_file = io.VTXWriter(MPI.COMM_WORLD, file + "_ELE" + ".bp", ele, engine="BP4")
     sig_file = io.VTXWriter(MPI.COMM_WORLD, file + "_SIG" + ".bp", sig, engine="BP4")
     eps_file = io.VTXWriter(MPI.COMM_WORLD, file + "_EPS" + ".bp", eps, engine="BP4")
-    
-    # += Nonlinear Solver
-    problem = NonlinearProblem(R, mx, bc)
-    solver = NewtonSolver(domain.comm, problem)
-    solver.atol = 1e-8
-    solver.rtol = 1e-8
-    solver.convergence_criterion = "incremental"
 
     # +==+ Setup stress output
     def cauchy_tensor(u, p, x, azi, ele, myo):
@@ -361,39 +518,127 @@ def fx_(tnm, file, tg_c, tg_s, depth):
         ])
         return eps
     
-    log.set_log_level(log.LogLevel.INFO)
+    # log.set_log_level(log.LogLevel.INFO)
 
-    # +==+==+
-    # Solution and Output
-    # += Solve
-    num_its, converged = solver.solve(mx)
-    if converged:
-        print(f"Converged in {num_its} iterations.")
+    # +==+ Boundary Conditions
+    print("\t" * depth + "+= Assign Boundary Conditions")
+    disp = EDGE[0] * int(tnm.split("_")[3])/100
+    if len(tnm.split("_")) == 7:
+        bc = dir_bc(Mxs, Vx, Vy, Vz, ft, tnm.split("_")[6] == "x1c", disp)
+    else: 
+        its = int(tnm.split("_")[-1])
+        phase_ext = np.linspace(0, disp, its)
+        phase_con = np.linspace(disp, -disp, its*2)
+        phase_exp = np.linspace(-disp, 0, its)
+        bc_u_iter = np.concatenate([phase_ext, phase_con, phase_exp]).astype(np.int32)
+
+    if len(tnm.split("_")) == 7:
+        # += Nonlinear Solver
+        problem = NonlinearProblem(R, mx, bc)
+        solver = NewtonSolver(domain.comm, problem)
+        solver.atol = 1e-8
+        solver.rtol = 1e-8
+        solver.convergence_criterion = "incremental"
+        # +==+==+
+        # Solution and Output
+        # += Solve
+        num_its, converged = solver.solve(mx)
+        if converged:
+            print(f"Converged in {num_its} iterations.")
+        else:
+            print(f"Not converged after {num_its} iterations.")
+
+        # += Evaluate values
+        u_eval = mx.sub(0).collapse()
+        p_eval = mx.sub(1).collapse()
+        dis.interpolate(u_eval)
+        # += Setup tensor space for stress tensor interpolation
+        cauchy = Expression(
+            e=cauchy_tensor(u_eval, p_eval, x, azi, ele, myo), 
+            X=Tes.element.interpolation_points()
+        )
+        epsilon = Expression(
+            e=green_tensor(u_eval, p_eval, x, azi, ele), 
+            X=Tes.element.interpolation_points()
+        )
+        sig.interpolate(cauchy)
+        eps.interpolate(epsilon)
+
+        n_comps = 9
+        sig_arr = sig.x.array
+        eps_arr = eps.x.array
+        n_nodes = len(sig_arr) // n_comps
+        r_sig = sig_arr.reshape((n_nodes, n_comps))
+        r_eps = eps_arr.reshape((n_nodes, n_comps))
+
+        data_dict = {
+            "sig_xx": r_sig[:, 0],
+            "sig_yy": r_sig[:, 4],
+            "sig_zz": r_sig[:, 8],
+            "sig_xy": r_sig[:, 1],
+            "sig_xz": r_sig[:, 2],
+            "sig_yz": r_sig[:, 5],
+            "eps_xx": r_eps[:, 0],
+            "eps_yy": r_eps[:, 4],
+            "eps_zz": r_eps[:, 8],
+            "eps_xy": r_eps[:, 1],
+            "eps_xz": r_eps[:, 2],
+            "eps_yz": r_eps[:, 5],
+            "Azimuth": azi.x.array[:],
+            "Elevation": ele.x.array[:],
+        }
+
+        pd.DataFrame(data_dict).to_csv(os.path.dirname(os.path.abspath(__file__)) + "/_csv/" + tnm + ".csv")
+
+        # += Write files
+        dis_file.write(0)
+        azi_file.write(0)
+        ele_file.write(0)
+        sig_file.write(0)
+        eps_file.write(0)
+
     else:
-        print(f"Not converged after {num_its} iterations.")
+        for i, d in enumerate(bc_u_iter):
+            bc = dir_bc(Mxs, Vx, Vy, Vz, ft, tnm.split("_")[6] == "x1c", d)
+            # += Nonlinear Solver
+            problem = NonlinearProblem(R, mx, bc)
+            solver = NewtonSolver(domain.comm, problem)
+            solver.atol = 1e-8
+            solver.rtol = 1e-8
+            solver.convergence_criterion = "incremental"
+            # +==+==+
+            # Solution and Output
+            # += Solve
+            num_its, converged = solver.solve(mx)
+            if converged:
+                print(f"Converged in {num_its} iterations.")
+            else:
+                print(f"Not converged after {num_its} iterations.")
 
-    # += Evaluate values
-    u_eval = mx.sub(0).collapse()
-    p_eval = mx.sub(1).collapse()
-    dis.interpolate(u_eval)
-    # += Setup tensor space for stress tensor interpolation
-    cauchy = Expression(
-        e=cauchy_tensor(u_eval, p_eval, x, azi, ele, myo), 
-        X=Tes.element.interpolation_points()
-    )
-    epsilon = Expression(
-        e=green_tensor(u_eval, p_eval, x, azi, ele), 
-        X=Tes.element.interpolation_points()
-    )
-    sig.interpolate(cauchy)
-    eps.interpolate(epsilon)
+            # += Evaluate values
+            u_eval = mx.sub(0).collapse()
+            p_eval = mx.sub(1).collapse()
+            dis.interpolate(u_eval)
+            # += Setup tensor space for stress tensor interpolation
+            cauchy = Expression(
+                e=cauchy_tensor(u_eval, p_eval, x, azi, ele, myo), 
+                X=Tes.element.interpolation_points()
+            )
+            epsilon = Expression(
+                e=green_tensor(u_eval, p_eval, x, azi, ele), 
+                X=Tes.element.interpolation_points()
+            )
+            sig.interpolate(cauchy)
+            eps.interpolate(epsilon)
 
-    # += Write files
-    dis_file.write(0)
+            # += Write files
+            dis_file.write(i)
+            sig_file.write(i)
+            eps_file.write(i)
+
     azi_file.write(0)
     ele_file.write(0)
-    sig_file.write(0)
-    eps_file.write(0)
+
     # += Close files
     dis_file.close()
     azi_file.close()
@@ -433,6 +678,19 @@ def msh_(tnm, msh, depth):
     EL_TAGS[5] += 1
     gmsh.model.occ.synchronize()
 
+    def id_corner(coord):
+        corners = {
+            (0, 0, 0): 10,
+            (EDGE[0], 0, 0): 11,
+            (0, EDGE[1], 0): 12,
+            (0, 0, EDGE[2]): 13,
+            (EDGE[0], EDGE[1], 0): 14,
+            (EDGE[0], 0, EDGE[2]): 15,
+            (0, EDGE[1], EDGE[2]): 16,
+            (EDGE[0], EDGE[1], EDGE[2]): 17
+        }
+        return corners.get(coord, False)
+
     # +==+ Generate physical groups
     for i in range(0, DIM+1, 1):
         # += Generate mass, com and tag data
@@ -461,6 +719,12 @@ def msh_(tnm, msh, depth):
                 continue
             # += Any other region can be arbitrarily labeled 
             else: 
+                if i == DIM - 3:
+                    if not(id_corner(tuple(gmsh.model.getValue(dim=0, tag=j, parametricCoord=[])))):
+                        continue
+                    else:
+                        gmsh.model.add_physical_group(dim=i, tags=[j], tag=id_corner(tuple(gmsh.model.getValue(dim=0, tag=j, parametricCoord=[]))), name="cx_" + str(j))
+                        continue
                 gmsh.model.add_physical_group(dim=i, tags=[j], tag=int(PY_TAGS[i]))
                 PY_TAGS[i] += 1
         gmsh.model.occ.synchronize()
@@ -471,7 +735,7 @@ def msh_(tnm, msh, depth):
     gmsh.model.mesh.setOrder(order=ORDER) 
 
     # +==+ Write File
-    file = os.path.dirname(os.path.abspath(__file__)) + "/_msh/" + "EMSimCube_ScrewAxis" + ".msh"
+    file = os.path.dirname(os.path.abspath(__file__)) + "/_msh/" + "EMSimCube" + ".msh"
     gmsh.write(file)
     gmsh.finalize()
     return file, TG_S, TG_C
@@ -501,25 +765,25 @@ if __name__ == '__main__':
     # += Arguments
     msh = False
     emfs = ["raw_" + x for x in ["test", "0", "1", "6", "8"]]
-    emfs = ["raw_0"]
+    # emfs = ["raw_1"]
     success = []
     failed = []
     for emf in emfs:
         ceq = "GC"
-        dsp = "01"
+        dsp = "15"
         etp = "dir_ani_x1x0c"
         tnm = "_".join([emf, ceq, dsp, etp])
         # += Run
         print("\t" * depth + "!! BEGIN TEST: " + tnm + " !!")
-        main(tnm, msh, depth) 
-        # try:
-        #     main(tnm, msh, depth)
-        #     success.append(emf)
-        #     print("\t" * depth + "!! TEST PASS: " + tnm + " !!")
-        # except:
-        #     print("\t" * depth + "!! TEST FAIL: " + tnm + " !!")
-        #     failed.append(emf)
-        #     continue
+        # main(tnm, msh, depth) 
+        try:
+            main(tnm, msh, depth)
+            success.append(emf)
+            print("\t" * depth + "!! TEST PASS: " + tnm + " !!")
+        except:
+            print("\t" * depth + "!! TEST FAIL: " + tnm + " !!")
+            failed.append(emf)
+            continue
     print("\t" * depth + "!! END !!") 
     print("\t" * depth + " ~> Pass: {}".format(success))
     print("\t" * depth + " ~> Fail: {}".format(failed))
