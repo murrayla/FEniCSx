@@ -771,7 +771,7 @@ if __name__ == '__main__':
     for emf in emfs:
         ceq = "GC"
         dsp = "15"
-        etp = "dir_ani_x1x0c"
+        etp = "dir_ani_x1c_5"
         tnm = "_".join([emf, ceq, dsp, etp])
         # += Run
         print("\t" * depth + "!! BEGIN TEST: " + tnm + " !!")
