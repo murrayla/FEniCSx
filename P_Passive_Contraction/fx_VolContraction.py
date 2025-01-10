@@ -26,6 +26,7 @@ import gmsh
 import math
 import ufl
 import csv
+import ast
 import os
 
 # += Parameters
@@ -34,19 +35,16 @@ INC = 10
 I_0 = 0
 F_0 = 0.0 
 ZDISC = 5 
+ZLINE = 14
 ORDER = 2
 QUADRATURE = 4
-H_ROT = 0.91755
-E_ROT = -1.08994
 X, Y, Z = 0, 1, 2
-# CONSTIT_CYT = [0.5]
-# CONSTIT_CYT = [1]
 CONSTIT_MYO = [1, 1, 1, 1]
-# CONSTIT_MYO = [1, 1, 1, 1]
 PXLS = {"x": 11, "y": 11, "z": 50}
-CUBE = {"x": 1024, "y": 1024, "z": 80}
+# CUBE = {"x": 1024, "y": 1024, "z": 80}
+CUBE = {"x": 1000, "y": 1000, "z": 100}
 SURF_NAMES = ["x0", "x1", "y0", "y1", "z0", "z1"]
-SCREW_AXIS = {0: ["x0-", 161], 1: ["-x-", 162], 2: ["-x1", 163]}
+# SCREW_AXIS = {0: ["x0-", 161], 1: ["-x-", 162], 2: ["-x1", 163]}
 EDGE = [PXLS[d]*CUBE[d] for d in ["x", "y", "z"]]
 SUR_OBJ_TAGS = dict(zip(SURF_NAMES, list(range(1, 7, 1))))
 EL_TAGS = {0: 1e0, 1: 1e2, 2: 1e3, 3: 5e3, 4: 1e4, 5: 2e4}
@@ -244,29 +242,46 @@ def dir_corner_bc(domain, mix_vs, Vx, Vy, Vz, ft, uni, du):
 #       dataframe with orientation data
 def prop_csv(tnm, depth):
     depth += 1
-    # += Determine file location
-    print("\t" * depth + "+= Load z-disc property data...")
-    file_path = "/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/Vec_files/"
-    files = []
-    cdt = tnm.split("_")[0]
-    nmb = tnm.split("_")[1] + "_"
-    # += Splice fields
-    if cdt == "raw":
-        file_path += "health/"
+    file = "/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/P_SegData/_csv/nreg_z_{}.csv".format(nmb)
+
+    if os.path.isfile(file):
+        # += File exists
+        print("\t" * depth + "~> File exists... Load file")
+        df = pd.read_csv(file)
     else:
-        file_path += "infarct/"
-    # += Read appropriate file into dataframe
-    for file in os.listdir(file_path):
-        if ("_props" in file) and (nmb in file):
-            if "_t_" in file: 
-                ele_df = pd.read_csv(file_path + file)
-            else:
-                azi_df = pd.read_csv(file_path + file)
-    # += Create new dataframe
-    ang_df = pd.concat(
-        [azi_df.iloc[:, [1, 4, 7]], ele_df.iloc[:, 2]], axis=1
-    )
-    return ang_df
+        # += Determine file location
+        print("\t" * depth + "~> Load region data and z-disc positions")
+        n_dict = {
+            "Node": [],
+            "Azi_[RAD]": [],
+            "Ele_[RAD]": []
+        }
+        nmb = int(tnm.split("_")[1])
+        # += Load region data
+        r_df = pd.read_csv("/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/P_SegData/_csv/reg_{}.csv".format(nmb))
+        # += Load z-discs
+        n_df = pd.read_csv("/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/P_SegData/_csv/z_pos.csv")
+
+        # += Iterate loading 
+        print("\t" * depth + "~> Build new dataframe")
+        for i, r_row in r_df.iterrows():
+            
+            n = r_row["ID"]
+            for j, n_row in n_df.iterrows():
+                if n_row["ID"] == n:
+                    x, y, z = ast.literal_eval(n_row["Node"])
+                    n_dict["Node"].append([x, y, z])
+                    n_dict["Azi_[RAD]"].append(r_row["Azi_[RAD]"])
+                    n_dict["Ele_[RAD]"].append(r_row["Ele_[RAD]"])
+                else:
+                    continue
+
+        # += Save data
+        print("\t" * depth + "~> Save: {}".format("reg_z_{}.csv".format(nmb)))
+        df = pd.DataFrame(n_dict)
+        df.to_csv(file, index=False)
+
+    return df
 
 # +==+==+==+
 # fx_
@@ -323,41 +338,25 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     azi, ele, con = Function(Vx), Function(Vy), Function(Vz)
 
     def wei_ang(pos, ang_type, df):
-        cur = np.array([np.fromstring(row["Centroid"].strip('()'), sep=',') for _, row in df.iterrows()])
+        cur = np.array([ast.literal_eval(row["Node"]) for _, row in df.iterrows()])
         for i, x in enumerate(["x", "y", "z"]):
             cur[:, i] = cur[:, i] * PXLS[x]
-        
         ang = np.array(
-            [row["Orientation [RAD]"] - H_ROT if not ang_type else row["Elevation Orientation [RAD]"] - E_ROT for _, row in df.iterrows()]
+            [row["Azi_[RAD]"] if not ang_type else row["Ele_[RAD]"] for _, row in df.iterrows()]
         )
-        if not ang_type:
-            ang[ang > 0.5] = 0
-            ang[ang < -0.5] = 0
-        else:
-            ang[ang > 0.5] = 0
-            ang[ang < -0.5] = 0
         dis = np.linalg.norm(cur - pos, axis=1)
-
         mask = dis <= 2000
         filt_dis = dis[mask]
         filt_ang = ang[mask] 
-
         if len(filt_dis) == 0:
             return 0
-        
         wei = 1 / (filt_dis + 1e-10)
         wei_ang = np.sum(filt_ang * wei) / np.sum(wei)
-
-        # if math.isnan(wei_ang):
-        #     print("here")
-
         return wei_ang
 
     def gaus_smooth(crds, vals, thrs):
         tree = cKDTree(crds)
         s_vals = np.zeros_like(vals)
-        
-        # Iterate through each node
         for i, xyz in enumerate(crds):
             idx = tree.query_ball_point(xyz, thrs)
             nei_xyz = crds[idx]
@@ -365,34 +364,23 @@ def fx_(tnm, file, tg_c, tg_s, depth):
             dits = np.linalg.norm(nei_xyz - xyz, axis=1)
             weis = np.exp(-0.5 * (dits / thrs) ** 2)
             s_vals[i] = np.sum(weis * nei_val) / np.sum(weis)
-        
         return s_vals
-            
-    ang_df = prop_csv(tnm, depth)
-    for i in range(len(azi.x.array[:])):
-        if tnm.split("_")[1] == "test":
+    
+    if tnm.split("_")[1] == "test":
+        for i in range(len(azi.x.array[:])):
             azi.x.array[i] = F_0
             ele.x.array[i] = F_0
-            continue
-        else:
+    else:
+        ang_df = prop_csv(tnm, depth)
+        for i in range(len(azi.x.array[:])):
             pos = np.array(x_n.function_space.tabulate_dof_coordinates()[i])
             azi.x.array[i] = wei_ang(pos, 0, ang_df)
             ele.x.array[i] = wei_ang(pos, 1, ang_df)    
 
-    azi.x.array[:] = gaus_smooth(np.array(x_n.function_space.tabulate_dof_coordinates()[:]), azi.x.array[:], 4000)
-    ele.x.array[:] = gaus_smooth(np.array(x_n.function_space.tabulate_dof_coordinates()[:]), ele.x.array[:], 4000)
-
-    # azi_file = io.VTXWriter(MPI.COMM_WORLD, file + "_AZI" + ".bp", azi, engine="BP4")
-    # ele_file = io.VTXWriter(MPI.COMM_WORLD, file + "_ELE" + ".bp", ele, engine="BP4")
-    # azi_file.write(0)
-    # azi_file.close()
-    # ele_file.write(0)
-    # ele_file.close()
-
-    # print(azi.x.array[:])
-    # print(ele.x.array[:])
-
-    # exit(0)
+    # azi.x.array[:] = gaus_smooth(np.array(x_n.function_space.tabulate_dof_coordinates()[:]), azi.x.array[:], 500)
+    # ele.x.array[:] = gaus_smooth(np.array(x_n.function_space.tabulate_dof_coordinates()[:]), ele.x.array[:], 500)
+    azi.x.array[:] = azi.x.array[:]
+    ele.x.array[:] = ele.x.array[:]
 
     i, j, k, a, b = ufl.indices(5)
     # # += Curvilinear mapping dependent on subdomain values
@@ -735,7 +723,7 @@ def msh_(tnm, msh, depth):
     gmsh.model.mesh.setOrder(order=ORDER) 
 
     # +==+ Write File
-    file = os.path.dirname(os.path.abspath(__file__)) + "/_msh/" + "EMSimCube" + ".msh"
+    file = os.path.dirname(os.path.abspath(__file__)) + "/_msh/RotCube.msh"
     gmsh.write(file)
     gmsh.finalize()
     return file, TG_S, TG_C
@@ -755,7 +743,7 @@ def main(tnm, msh, depth):
     else:
         tg_s = {2: [], 3: {'tag': [], 'angles': []}}
         tg_c = {2: [5, 6, 1, 2, 3, 4], 3: [10000]}
-        file = os.path.dirname(os.path.abspath(__file__)) + "/_msh/" + "EMSimCube" + ".msh"
+        file = os.path.dirname(os.path.abspath(__file__)) + "/_msh/RotCube.msh"
     # += Enter FEniCSx
     fx_(tnm, file, tg_c, tg_s, depth)
 
@@ -764,14 +752,13 @@ if __name__ == '__main__':
     depth = 0
     # += Arguments
     msh = False
-    emfs = ["raw_" + x for x in ["test", "0", "1", "6", "8"]]
-    # emfs = ["raw_1"]
+    emfs = ["seg_" + x for x in ["test"] + [str(y) for y in range(0, 28, 1)]]
     success = []
     failed = []
     for emf in emfs:
         ceq = "GC"
-        dsp = "15"
-        etp = "dir_ani_x1c_5"
+        dsp = "00"
+        etp = "dir_ani_x1x0c"
         tnm = "_".join([emf, ceq, dsp, etp])
         # += Run
         print("\t" * depth + "!! BEGIN TEST: " + tnm + " !!")
