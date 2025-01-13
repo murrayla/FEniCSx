@@ -54,6 +54,9 @@ LOCS_COM = [
     (EDGE[0]/2, F_0, EDGE[2]/2), (EDGE[0]/2, EDGE[1], EDGE[2]/2), 
     (EDGE[0]/2, EDGE[1]/2, F_0), (EDGE[0]/2, EDGE[1]/2, EDGE[2]) 
 ]
+SARC_RECT = np.meshgrid(
+    np.linspace(0, 2000, 100), np.linspace(0, 100, 10), np.linspace(0, 100, 10)
+)
 SUR_OBJ_ASSIGN = dict(zip(LOCS_COM, [[n+1, name] for n, name in enumerate(SURF_NAMES)]))
 EMF_PATH = "/Users/murrayla/Documents/main_PhD/P_Segmentations/myofibril_segmentation/Segmented_Data/"
 
@@ -235,55 +238,6 @@ def dir_corner_bc(domain, mix_vs, Vx, Vy, Vz, ft, uni, du):
     return bc
 
 # +==+==+==+
-# prop_csv:
-#   Inputs: 
-#       tnm  | str | test name
-#   Outputs:
-#       dataframe with orientation data
-def prop_csv(tnm, depth):
-    depth += 1
-    file = "/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/P_SegData/_csv/nreg_z_{}.csv".format(nmb)
-
-    if os.path.isfile(file):
-        # += File exists
-        print("\t" * depth + "~> File exists... Load file")
-        df = pd.read_csv(file)
-    else:
-        # += Determine file location
-        print("\t" * depth + "~> Load region data and z-disc positions")
-        n_dict = {
-            "Node": [],
-            "Azi_[RAD]": [],
-            "Ele_[RAD]": []
-        }
-        nmb = int(tnm.split("_")[1])
-        # += Load region data
-        r_df = pd.read_csv("/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/P_SegData/_csv/reg_{}.csv".format(nmb))
-        # += Load z-discs
-        n_df = pd.read_csv("/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/P_SegData/_csv/z_pos.csv")
-
-        # += Iterate loading 
-        print("\t" * depth + "~> Build new dataframe")
-        for i, r_row in r_df.iterrows():
-            
-            n = r_row["ID"]
-            for j, n_row in n_df.iterrows():
-                if n_row["ID"] == n:
-                    x, y, z = ast.literal_eval(n_row["Node"])
-                    n_dict["Node"].append([x, y, z])
-                    n_dict["Azi_[RAD]"].append(r_row["Azi_[RAD]"])
-                    n_dict["Ele_[RAD]"].append(r_row["Ele_[RAD]"])
-                else:
-                    continue
-
-        # += Save data
-        print("\t" * depth + "~> Save: {}".format("reg_z_{}.csv".format(nmb)))
-        df = pd.DataFrame(n_dict)
-        df.to_csv(file, index=False)
-
-    return df
-
-# +==+==+==+
 # fx_
 #   Inputs: 
 #       tnm  | str | test name
@@ -326,6 +280,7 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     myo.x.array[cyt_tgs] = np.full_like(cyt_tgs, CONSTIT_MYO[0], dtype=default_scalar_type)
 
     # +==+ Variables
+    print("\t" * depth + "+= Setup Variables")
     v, q = ufl.TestFunctions(Mxs)
     # += [CURRENT]
     mx = Function(Mxs)
@@ -333,54 +288,58 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     
     # += Initial
     # +==+ Curvilinear setup
+    print("\t" * depth + "+= Setup Curvilinear Anisotropy")
     x = ufl.SpatialCoordinate(domain)
     x_n = Function(V)
     azi, ele, con = Function(Vx), Function(Vy), Function(Vz)
 
-    def wei_ang(pos, ang_type, df):
-        cur = np.array([ast.literal_eval(row["Node"]) for _, row in df.iterrows()])
+    def assign_angle(pos, df):
+        cur = np.array([ast.literal_eval(row) for row in df["Node"]])
         for i, x in enumerate(["x", "y", "z"]):
             cur[:, i] = cur[:, i] * PXLS[x]
-        ang = np.array(
-            [row["Azi_[RAD]"] if not ang_type else row["Ele_[RAD]"] for _, row in df.iterrows()]
-        )
         dis = np.linalg.norm(cur - pos, axis=1)
-        mask = dis <= 2000
-        filt_dis = dis[mask]
-        filt_ang = ang[mask] 
-        if len(filt_dis) == 0:
+        f_azi = df["Azi_[RAD]"][dis <= 100] 
+        f_ele = df["Azi_[RAD]"][dis <= 100] 
+        if len(f_azi) == 0: 
             return 0
-        wei = 1 / (filt_dis + 1e-10)
-        wei_ang = np.sum(filt_ang * wei) / np.sum(wei)
-        return wei_ang
+        return np.sum(f_azi) / len(f_azi), np.sum(f_ele) / len(f_ele)
 
-    def gaus_smooth(crds, vals, thrs):
-        tree = cKDTree(crds)
+    def smooth_angles(pos, vals, tol):
+        tree = cKDTree(pos)
         s_vals = np.zeros_like(vals)
-        for i, xyz in enumerate(crds):
+        for i, xyz in enumerate(pos):
             idx = tree.query_ball_point(xyz, thrs)
-            nei_xyz = crds[idx]
+            nei_xyz = pos[idx]
             nei_val = vals[idx]
             dits = np.linalg.norm(nei_xyz - xyz, axis=1)
             weis = np.exp(-0.5 * (dits / thrs) ** 2)
             s_vals[i] = np.sum(weis * nei_val) / np.sum(weis)
         return s_vals
     
-    if tnm.split("_")[1] == "test":
+    nmb = tnm.split("_")[1] == "test"
+    if nmb:
         for i in range(len(azi.x.array[:])):
             azi.x.array[i] = F_0
             ele.x.array[i] = F_0
     else:
-        ang_df = prop_csv(tnm, depth)
+        print("\t" * depth + "+= Load node angle data")
+        ang_df = pd.read_csv("/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/P_SegData/_csv/znode_{}.csv".format(nmb))
         for i in range(len(azi.x.array[:])):
             pos = np.array(x_n.function_space.tabulate_dof_coordinates()[i])
-            azi.x.array[i] = wei_ang(pos, 0, ang_df)
-            ele.x.array[i] = wei_ang(pos, 1, ang_df)    
+            """
+            - Load all the coordinates and their values in
+            - Associate with closest nodes
+            - Smooth across plane more than through plane??
+                - Extend angle data through sarcomere
+                - Strongest at Z-Disc
+            - Then smooth across y 
+            """
+            azi.x.array[i], ele.x.array[i] = assign_angle(pos, ang_df)
 
-    # azi.x.array[:] = gaus_smooth(np.array(x_n.function_space.tabulate_dof_coordinates()[:]), azi.x.array[:], 500)
-    # ele.x.array[:] = gaus_smooth(np.array(x_n.function_space.tabulate_dof_coordinates()[:]), ele.x.array[:], 500)
-    azi.x.array[:] = azi.x.array[:]
-    ele.x.array[:] = ele.x.array[:]
+    azi.x.array[:] = gaus_smooth(np.array(x_n.function_space.tabulate_dof_coordinates()[:]), azi.x.array[:], 500)
+    ele.x.array[:] = gaus_smooth(np.array(x_n.function_space.tabulate_dof_coordinates()[:]), ele.x.array[:], 500)
+    # azi.x.array[:] = azi.x.array[:]
+    # ele.x.array[:] = ele.x.array[:]
 
     i, j, k, a, b = ufl.indices(5)
     # # += Curvilinear mapping dependent on subdomain values
@@ -752,7 +711,7 @@ if __name__ == '__main__':
     depth = 0
     # += Arguments
     msh = False
-    emfs = ["seg_" + x for x in ["test"] + [str(y) for y in range(0, 28, 1)]]
+    emfs = ["seg_" + x for x in ["test"] + [str(y) for y in range(0, 36, 1)]]
     success = []
     failed = []
     for emf in emfs:
