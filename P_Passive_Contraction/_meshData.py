@@ -12,11 +12,7 @@
 # += Imports
 import pandas as pd
 import numpy as np
-import gmsh
-import math
-import csv
 import ast
-import os
 from tqdm import tqdm
 import multiprocessing as mp
 
@@ -34,7 +30,7 @@ def average_angle(n_id, cart, azi, ele, i, depth):
         cur = np.array([ast.literal_eval(row) for row in s_df["Node"]])
         cur = cur * np.array([PXLS[x] for x in ["x", "y", "z"]])
         dis = np.linalg.norm(cur - pos, axis=1)
-        idx = np.where(dis < 500)
+        idx = np.where(dis < 1000)
         if not(len(dis[idx])):
             continue
         wi = [1/d for d in dis[idx]]
@@ -77,7 +73,7 @@ def angle_assign(depth):
     d_df = pd.read_csv("/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/BranchingContraction/DiaRegions.csv")
     r_num = len(d_df["x"])
 
-    with mp.Pool(processes=mp.cpu_count()) as pool:
+    with mp.Pool(processes=mp.cpu_count()-2) as pool:
         pool.starmap(average_angle, [(n_id, cart, azi, ele, i, depth) for i, _ in d_df.iterrows()])
 
 

@@ -293,53 +293,33 @@ def fx_(tnm, file, tg_c, tg_s, depth):
     x_n = Function(V)
     azi, ele, con = Function(Vx), Function(Vy), Function(Vz)
 
-    def assign_angle(pos, df):
-        cur = np.array([ast.literal_eval(row) for row in df["Node"]])
-        for i, x in enumerate(["x", "y", "z"]):
-            cur[:, i] = cur[:, i] * PXLS[x]
-        dis = np.linalg.norm(cur - pos, axis=1)
-        f_azi = df["Azi_[RAD]"][dis <= 100] 
-        f_ele = df["Azi_[RAD]"][dis <= 100] 
-        if len(f_azi) == 0: 
-            return 0
-        return np.sum(f_azi) / len(f_azi), np.sum(f_ele) / len(f_ele)
-
-    def smooth_angles(pos, vals, tol):
-        tree = cKDTree(pos)
-        s_vals = np.zeros_like(vals)
-        for i, xyz in enumerate(pos):
-            idx = tree.query_ball_point(xyz, thrs)
-            nei_xyz = pos[idx]
-            nei_val = vals[idx]
-            dits = np.linalg.norm(nei_xyz - xyz, axis=1)
-            weis = np.exp(-0.5 * (dits / thrs) ** 2)
-            s_vals[i] = np.sum(weis * nei_val) / np.sum(weis)
-        return s_vals
-    
-    nmb = tnm.split("_")[1] == "test"
-    if nmb:
+    # += Determin test or real case
+    if tnm.split("_")[1] == "test":
         for i in range(len(azi.x.array[:])):
             azi.x.array[i] = F_0
             ele.x.array[i] = F_0
     else:
+        # += Load data
+        nmb = tnm.split("_")[1]
         print("\t" * depth + "+= Load node angle data")
-        ang_df = pd.read_csv("/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/P_SegData/_csv/znode_{}.csv".format(nmb))
+        # += Retrieve region specific anistropic values
+        ang_df = pd.read_csv("P_Passive_Contraction/_csv/vals_{}.csv".format(nmb))
+        n_list = []
+        f = "/Users/murrayla/Documents/main_PhD/FEniCSx/FEniCSx/P_Passive_Contraction/_msh/_mesh.nodes"
+        # += Generate node coordinates
+        for line in open(f, 'r'):
+            n_list.append(line.strip().replace('\t', ' ').split(' '))
+        node = np.array(n_list[1:]).astype(np.float64)
+        cart = node[:, 1:]
+        new_id = []
+        # += Reorganise data to match appropriate node order
         for i in range(len(azi.x.array[:])):
             pos = np.array(x_n.function_space.tabulate_dof_coordinates()[i])
-            """
-            - Load all the coordinates and their values in
-            - Associate with closest nodes
-            - Smooth across plane more than through plane??
-                - Extend angle data through sarcomere
-                - Strongest at Z-Disc
-            - Then smooth across y 
-            """
-            azi.x.array[i], ele.x.array[i] = assign_angle(pos, ang_df)
-
-    azi.x.array[:] = gaus_smooth(np.array(x_n.function_space.tabulate_dof_coordinates()[:]), azi.x.array[:], 500)
-    ele.x.array[:] = gaus_smooth(np.array(x_n.function_space.tabulate_dof_coordinates()[:]), ele.x.array[:], 500)
-    # azi.x.array[:] = azi.x.array[:]
-    # ele.x.array[:] = ele.x.array[:]
+            dis = np.linalg.norm(pos - cart, axis=1)
+            new_id.append(np.argmin(dis))
+        # += Assign values
+        azi.x.array[:] = ang_df["a"][new_id]
+        ele.x.array[:] = ang_df["e"][new_id]
 
     i, j, k, a, b = ufl.indices(5)
     # # += Curvilinear mapping dependent on subdomain values
