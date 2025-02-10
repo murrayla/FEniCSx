@@ -19,25 +19,32 @@ import multiprocessing as mp
 # += Parameters
 PXLS = {"x": 11, "y": 11, "z": 50}
 
-def average_angle(n_id, cart, azi, ele, i, depth):
+def average_angle(n_id, f, cart, azi, ele, i, depth):
     depth += 1
 
     print("\t" * depth + ".. load region {}".format(i))
     s_df = pd.read_csv("/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/P_SegData/_csv/snode_{}.csv".format(i))
     a, e = s_df["Azi_[RAD]"].to_numpy(), s_df["Ele_[RAD]"].to_numpy()
+    cur = np.array([ast.literal_eval(row) for row in s_df["Node"]])
+    cur = cur * np.array([11, 11, 50])
     # += Isolate a node
     for j, pos in enumerate(cart):
-        cur = np.array([ast.literal_eval(row) for row in s_df["Node"]])
-        cur = cur * np.array([PXLS[x] for x in ["x", "y", "z"]])
         dis = np.linalg.norm(cur - pos, axis=1)
-        idx = np.where(dis < 1000)
-        if not(len(dis[idx])):
-            continue
-        wi = [1/d for d in dis[idx]]
-        a_xi, e_xi = [x for x in a[idx]], [x for x in e[idx]]
-        a_xiwi, e_xiwi = [x * y for x, y in zip(a_xi, wi)], [x * y for x, y in zip(e_xi, wi)]
-        azi[j] = sum(a_xiwi) / sum(wi)
-        ele[j] = sum(e_xiwi) / sum(wi)
+        idx = np.argmin(dis)
+        if dis[idx] < 500:
+            azi[j] = a[idx]
+            ele[j] = e[idx]
+        else:
+            azi[j] = 0.0
+            ele[j] = 0.0
+        # idx = np.where(dis < 1000)
+        # if not(len(dis[idx])):
+        #     continue
+        # wi = [1/d for d in dis[idx]]
+        # a_xi, e_xi = [x for x in a[idx]], [x for x in e[idx]]
+        # a_xiwi, e_xiwi = [x * y for x, y in zip(a_xi, wi)], [x * y for x, y in zip(e_xi, wi)]
+        # azi[j] = sum(a_xiwi) / sum(wi)
+        # ele[j] = sum(e_xiwi) / sum(wi)
     # += Save to dataframe
     pd.DataFrame(
         data={
@@ -45,10 +52,9 @@ def average_angle(n_id, cart, azi, ele, i, depth):
             "a": azi,
             "e": ele
         }
-    ).to_csv("P_Passive_Contraction/_csv/vals_{}.csv".format(i), index=False)
+    ).to_csv("P_Passive_Contraction/_csv/vals_{}_{}.csv".format(f, i), index=False)
 
-
-def angle_assign(depth):
+def angle_assign(file, depth):
     depth += 1
     print("\t" * depth + "~> Begin anistropic node assignment")
 
@@ -60,7 +66,7 @@ def angle_assign(depth):
 
     # += Store node data
     n_list = []
-    f = "/Users/murrayla/Documents/main_PhD/FEniCSx/FEniCSx/P_Passive_Contraction/_msh/_mesh.nodes"
+    f = "/Users/murrayla/Documents/main_PhD/FEniCSx/FEniCSx/P_Passive_Contraction/_msh/" + file + "_mesh.nodes"
     for line in open(f, 'r'):
         n_list.append(line.strip().replace('\t', ' ').split(' '))
     node = np.array(n_list[1:]).astype(np.float64)
@@ -73,15 +79,19 @@ def angle_assign(depth):
     d_df = pd.read_csv("/Users/murrayla/Documents/main_PhD/P_BranchingPaper/A_Scripts/BranchingContraction/DiaRegions.csv")
     r_num = len(d_df["x"])
 
+
+    # for i, _ in d_df.iterrows():
+    #     average_angle(n_id, file, cart, azi, ele, i, depth) 
+
     with mp.Pool(processes=mp.cpu_count()-2) as pool:
-        pool.starmap(average_angle, [(n_id, cart, azi, ele, i, depth) for i, _ in d_df.iterrows()])
+        pool.starmap(average_angle, [(n_id, file, cart, azi, ele, i, depth) for i, _ in d_df.iterrows()])
 
 
 # +==+==+==+
 # mesh_nodes
 #   Input(s): 
 #   Output(s): 
-def mesh_nodes(file, enum, depth):
+def mesh_nodes(file, f, enum, depth):
     depth += 1
     print("\t" * depth + "~> Load .msh file and output nodes")
 
@@ -91,7 +101,7 @@ def mesh_nodes(file, enum, depth):
         5: "8-node-hexahedron",  9: "6-node-second-order-triangle", 
         10: "9-node-second-order-quadrangle",  11: "10-node-second-order-tetrahedron \n \n"
     }    
-    msh_file = open(file, 'r')
+    msh_file = open(file + f + ".msh", 'r')
     brks = dict()
     n_list, n_stop = list(), 0
     e_list, e_stop = list(), 0
@@ -124,7 +134,7 @@ def mesh_nodes(file, enum, depth):
     # += Store node data
     print("\t" * depth + "~> Write node data")
     path = "P_Passive_Contraction/_msh/"
-    n_file = open(path + '_mesh.nodes', 'w')
+    n_file = open(path + f + '_mesh.nodes', 'w')
     n_file.write(n_list[0] + "\n")
     # += Iterate values
     n_pos = dict()
@@ -149,7 +159,7 @@ def mesh_nodes(file, enum, depth):
 
     # += Store element data
     print("\t" * depth + "~> Write element data")
-    element_file = open(path + '_mesh.ele', 'w')
+    element_file = open(path + f + '_mesh.ele', 'w')
     element_file.write(e_list[0] + "\n")
     types = {enum: elems[enum].strip()}
     # += Iterate values
@@ -178,8 +188,12 @@ def main(depth):
 
     # += Output node positional data
     print("\t" * depth + "+= Output node data")
-    # mesh_nodes("P_Passive_Contraction/_msh/RotCube.msh", 11, depth)
-    angle_assign(depth)
+    f = "EMGEO_3100"
+    stem = "EMGEO_"
+    files = [stem + x for x in ["200", "600", "1000", "1400", "1800", "2200", "2600", "3000"]]
+    for f in files:
+        mesh_nodes("P_Passive_Contraction/_msh/", f, 11, depth)
+        angle_assign(f, depth)
 
 # +==+==+
 # Main check for script operation.
