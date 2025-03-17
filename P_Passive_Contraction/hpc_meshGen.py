@@ -3,14 +3,15 @@
     Contact: murrayla@student.unimelb.edu.au
              liam.a.murr@gmail.com
     ORCID: https://orcid.org/0009-0003-9276-6627
-    File Name: fx.py
-        Contraction over volume from EM data informed anisotropy
+    File Name: hpc_meshGen.py
+        HPC version of meshGen for operation in commandline
 """
 
 # +==+==+==+
 # Setup
 # += Imports
 import numpy as np
+import argparse
 import gmsh
 import os
 
@@ -19,31 +20,7 @@ DIM = 3
 I_0 = 0
 F_0 = 0.0
 ORDER = 2
-PXLS = {"x": 11, "y": 11, "z": 50}
-CUBE = {"x": 1000, "y": 1000, "z": 100}
-EDGE = [PXLS[d]*CUBE[d] for d in ["x", "y", "z"]]
 
-# += Centre of Masses
-VOL = [(EDGE[0]/2, EDGE[1]/2, EDGE[2]/2)]
-SUR = [
-    (F_0, EDGE[1]/2, EDGE[2]/2), (EDGE[0], EDGE[1]/2, EDGE[2]/2), 
-    (EDGE[0]/2, F_0, EDGE[2]/2), (EDGE[0]/2, EDGE[1], EDGE[2]/2), 
-    (EDGE[0]/2, EDGE[1]/2, F_0), (EDGE[0]/2, EDGE[1]/2, EDGE[2]) 
-]
-LIN = [
-    (EDGE[0]/2, F_0, F_0), (EDGE[0]/2, F_0, EDGE[2]), 
-    (F_0, EDGE[1]/2, F_0), (EDGE[0], EDGE[1]/2, F_0),
-    (EDGE[0]/2, EDGE[1], F_0), (EDGE[0]/2, EDGE[1], EDGE[2]), 
-    (F_0, EDGE[1]/2, EDGE[2]), (EDGE[0], EDGE[1]/2, EDGE[2]),
-    (F_0, F_0, EDGE[2]/2), (F_0, EDGE[1], EDGE[2]/2), 
-    (EDGE[0], F_0, EDGE[2]/2), (EDGE[0], EDGE[1], EDGE[2]/2),
-]
-PNT = [
-    (F_0, F_0, F_0), (EDGE[0], F_0, F_0), 
-    (F_0, EDGE[1], F_0), (F_0, F_0, EDGE[2]), 
-    (EDGE[0], EDGE[1], F_0), (EDGE[0], F_0, EDGE[2]), 
-    (F_0, EDGE[1], EDGE[2]), (EDGE[0], EDGE[1], EDGE[2])
-]
 # += Labels
 VOL_NAM = ["Volume"]
 SUR_NAM = [
@@ -79,7 +56,7 @@ PNT_NAM = [
 #       .msh file of mesh
 #       tg_c | dict | cytosol physical element data
 #       tg_S | dict | sarcomere physical element data
-def msh_(tnm, s, e_tg, p_tg, l_tg, depth):
+def msh_(tnm, s, b, e_tg, p_tg, l_tg, depth):
     depth += 1
     print("\t" * depth + "+= Generate Mesh: {}.msh".format(tnm + str(s)))
 
@@ -198,22 +175,56 @@ def msh_(tnm, s, e_tg, p_tg, l_tg, depth):
 #       tnm  | str | test name
 #   Outputs:
 #       .bp folder of deformation
-def main(tnm, depth):
+def main(tnm, s, b, depth):
     depth += 1
-
-    # += Iterate Files Sizes
-    s = 1500
     # += Tag Values
     ELM_TGS = {0: [1000], 1: [100], 2: [10], 3: [1]}
     PHY_TGS = {0: [5000], 1: [500], 2: [50], 3: [5]}
     LAB_TGS = {0: [], 1: [], 2: [], 3: []}
     # += Mesh generation
-    f, tg, l_tg = msh_(tnm, s, ELM_TGS, PHY_TGS, LAB_TGS, depth)
+    f, tg, l_tg = msh_(tnm, s, b, ELM_TGS, PHY_TGS, LAB_TGS, depth)
     
 # +==+==+ Main Check
 if __name__ == '__main__':
     depth = 0
     print("\t" * depth + "!! MESHING !!") 
     tnm = "EMGEO_"
-    main(tnm, depth) 
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-s", "--mesh_size",type=float)
+    parser.add_argument("-b", "--test_type",type=float)
+    args = parser.parse_args()
+    s = args.mesh_size
+    b = args.test_type
+    # += Dimension data
+    # += Per test
+    if b:
+        CUBE = {"x": 3900, "y": 1100, "z": 200}
+        tnm += "BIG_"
+    else:
+        CUBE = {"x": 1000, "y": 1000, "z": 100}
+    # += Constant
+    PXLS = {"x": 11, "y": 11, "z": 50}
+    EDGE = [PXLS[d]*CUBE[d] for d in ["x", "y", "z"]]
+    # += Centre of Masses
+    VOL = [(EDGE[0]/2, EDGE[1]/2, EDGE[2]/2)]
+    SUR = [
+        (F_0, EDGE[1]/2, EDGE[2]/2), (EDGE[0], EDGE[1]/2, EDGE[2]/2), 
+        (EDGE[0]/2, F_0, EDGE[2]/2), (EDGE[0]/2, EDGE[1], EDGE[2]/2), 
+        (EDGE[0]/2, EDGE[1]/2, F_0), (EDGE[0]/2, EDGE[1]/2, EDGE[2]) 
+    ]
+    LIN = [
+        (EDGE[0]/2, F_0, F_0), (EDGE[0]/2, F_0, EDGE[2]), 
+        (F_0, EDGE[1]/2, F_0), (EDGE[0], EDGE[1]/2, F_0),
+        (EDGE[0]/2, EDGE[1], F_0), (EDGE[0]/2, EDGE[1], EDGE[2]), 
+        (F_0, EDGE[1]/2, EDGE[2]), (EDGE[0], EDGE[1]/2, EDGE[2]),
+        (F_0, F_0, EDGE[2]/2), (F_0, EDGE[1], EDGE[2]/2), 
+        (EDGE[0], F_0, EDGE[2]/2), (EDGE[0], EDGE[1], EDGE[2]/2),
+    ]
+    PNT = [
+        (F_0, F_0, F_0), (EDGE[0], F_0, F_0), 
+        (F_0, EDGE[1], F_0), (F_0, F_0, EDGE[2]), 
+        (EDGE[0], EDGE[1], F_0), (EDGE[0], F_0, EDGE[2]), 
+        (F_0, EDGE[1], EDGE[2]), (EDGE[0], EDGE[1], EDGE[2])
+    ]
+    main(tnm, s, b, depth) 
     

@@ -203,7 +203,7 @@ def msh_(tnm, s, ELM_TGS, PHY_TGS, LAB_TGS, depth):
 def main(tnm, depth):
     depth += 1
     # += Ref level
-    s = 900
+    s = 1500
     # += Tag Values
     ELM_TGS = {0: [1000], 1: [100], 2: [10], 3: [1]}
     PHY_TGS = {0: [5000], 1: [500], 2: [50], 3: [5]}

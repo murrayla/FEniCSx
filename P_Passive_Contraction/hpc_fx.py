@@ -3,21 +3,24 @@
     Contact: murrayla@student.unimelb.edu.au
              liam.a.murr@gmail.com
     ORCID: https://orcid.org/0009-0003-9276-6627
-    File Name: fx.py
+    File Name: hpc_fx.py
         Contraction over volume from EM data informed anisotropy
 """
 
 # +==+==+==+
 # Setup
 # += Imports
-from dolfinx import log, io,  default_scalar_type, geometry
-from dolfinx.fem import Function, FunctionSpace, dirichletbc, locate_dofs_topological, Expression, locate_dofs_geometrical
+from dolfinx import log, io,  default_scalar_type
+# from dolfinx.fem import Function, functionspace, dirichletbc, locate_dofs_topological, Expression
+from dolfinx.fem import Function, functionspace, dirichletbc, locate_dofs_topological, Expression, element
 from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
-from _meshGen import msh_
+from basix.ufl import element, mixed_element
 from mpi4py import MPI
 import pandas as pd
 import numpy as np
+import argparse
+import basix
 import ufl
 import os
 # += Parameters
@@ -34,7 +37,6 @@ X, Y, Z = 0, 1, 2
 CONSTIT_MYO = [1, 1, 1, 1]
 MNR_CONS = [1, 1]
 HLZ_CONS = [x for x in [0.059, 8.023, 18.472, 16.026, 2.481, 11.120, 0.216, 11.436]]
-# HLZ_CONS = [x for x in [1, 1, 1, 1, 1, 1, 1, 1]]
 PXLS = {"x": 11, "y": 11, "z": 50}
 CUBE = {"x": 1000, "y": 1000, "z": 100}
 EDGE = [PXLS[d]*CUBE[d] for d in ["x", "y", "z"]]
@@ -80,11 +82,6 @@ def cauchy_tensor(u, p, x, azi, ele, depth):
     C = ufl.variable(F.T * F)  # Right Cauchy-Green tensor
     B = ufl.variable(F * F.T)  # Left Cauchy-Green tensor
 
-    # e1 = ufl.as_vector([[
-    #     ufl.cos(azi) * ufl.cos(ele),
-    #     ufl.sin(azi) * ufl.cos(ele),
-    #     ufl.sin(ele)
-    # ]])
     e1 = ufl.as_tensor([[1.0, 0.0, 0.0]]) 
     e2 = ufl.as_tensor([[0.0, 1.0, 0.0]]) 
     I4e1 = ufl.inner(e1 * C, e1)
@@ -154,8 +151,8 @@ def dir_bc(mix_vs, Vx, Vy, Vz, ft, n_tg, l_tg, du, depth):
 
     # += Interpolate 
     uxx0, uxx1, uyx0, uyx1, uzx0, uzx1 = Function(Vx), Function(Vx), Function(Vy), Function(Vy), Function(Vz), Function(Vz)
-    uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du)))
-    uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+    uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du//2)))
+    uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-du//2)))
     uyx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
     uyx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
     uzx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
@@ -218,7 +215,6 @@ def anistropic(tnm, msh_ref, azi_vals, ele_vals, x_n, depth):
     nmb = tnm.split("_")[0]
     ang_df = pd.read_csv("P_Passive_Contraction/_csv/vals_{}_{}.csv".format("EMGEO_" + str(msh_ref), nmb))
     n_list = []
-    # f = "/Users/murrayla/Documents/main_PhD/FEniCSx/FEniCSx/P_Passive_Contraction/_msh/" + "EMGEO_" + str(msh_ref) + "_" + str(nmb) + "_mesh.nodes"
     f = "/Users/murrayla/Documents/main_PhD/FEniCSx/FEniCSx/P_Passive_Contraction/_msh/" + "EMGEO_" + str(msh_ref) + "_mesh.nodes"
 
     # += Generate node coordinates
@@ -263,12 +259,10 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
     # += Domain Setup
     print("\t" * depth + "+= Load Mesh and Setup Vector Spaces")
     domain, ct, ft = io.gmshio.read_from_msh(filename=file, comm=MPI.COMM_WORLD, rank=0, gdim=DIM)
-    V2 = ufl.VectorElement(family="Lagrange", cell=domain.ufl_cell(), degree=ORDER, quad_scheme="default")
-    V1 = ufl.FiniteElement(family="Lagrange", cell=domain.ufl_cell(), degree=ORDER-1, quad_scheme="default")
-    Mxs = FunctionSpace(mesh=domain, element=ufl.MixedElement([V2, V1]))
-    Tes = FunctionSpace(mesh=domain, element=("Lagrange", ORDER, (DIM, DIM)))
-
-    # print(Tes.element.interpolation_points())
+    V2 = element(family="Lagrange", cell=domain.basix_cell(), degree=ORDER, shape=(domain.geometry.dim,))
+    V1 = element(family="Lagrange", cell=domain.basix_cell(), degree=ORDER-1)
+    Mxs = functionspace(mesh=domain, element=mixed_element([V2, V1]))
+    Tes = functionspace(mesh=domain, element=("Lagrange", ORDER, (DIM, DIM)))
 
     # += Extract subdomains for dofs
     print("\t" * depth + "+= Extract Subdomains")
@@ -290,20 +284,17 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
     else:
         azi.x.array[:], ele.x.array[:] = anistropic(tnm, msh_ref, azi_vals, ele_vals, x_n, depth)
 
-    # Rotation matrices (azimuth then elevation)
+    # += Create Push matrix
     R_azi = ufl.as_matrix([
         [ufl.cos(azi), -ufl.sin(azi), 0],
         [ufl.sin(azi),  ufl.cos(azi), 0],
         [0,             0,            1]
     ])
-
     R_ele = ufl.as_matrix([
-        [1, 0,             0],
+        [1, 0, 0],
         [0, ufl.cos(ele), -ufl.sin(ele)],
         [0, ufl.sin(ele),  ufl.cos(ele)]
     ])
-
-    # Total rotation (first elevation, then azimuth)
     Push = R_azi * R_ele  
 
     # += Variables
@@ -311,87 +302,64 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
     v, q = ufl.TestFunctions(Mxs)
     mx = Function(Mxs)
     u, p = ufl.split(mx)
-    i, j, k, l, a, b = ufl.indices(6)  # Increased indices for clarity
-
-    # Apply transformation to displacement field
+    i, j, k, l, a, b = ufl.indices(6)  
     u_nu = Push * u
 
-    # Deformation gradient
+    # += Kinematics
     I = ufl.Identity(DIM)  
     F = I + ufl.grad(u_nu)  
 
-    # Covariant basis vectors (undeformed)
+    # += [UNDERFORMED] Covariant basis vectors 
     A1 = ufl.as_vector([
         ufl.cos(azi) * ufl.cos(ele),
         ufl.sin(azi) * ufl.cos(ele),
         ufl.sin(ele)
     ])
     A2 = ufl.as_vector([0.0, 1.0, 0.0])  
-    A3 = ufl.as_vector([0.0, 0.0, 1.0])  
+    A3 = ufl.as_vector([0.0, 0.0, 1.0])
 
-    # A_v = ufl.as_tensor([A1, A2, A3])
-    # a_v = ufl.as_tensor(F * A_v[i] for i in range(3))  # Deformed basis vectors
-
-    # Metric tensors
-    # G_v = ufl.as_tensor(ufl.dot(A_v[i], A_v[j]), (i, j))  # Reference metric
+    # += [UNDERFORMED] Metric tensors
     G_v = ufl.as_tensor([
         [ufl.dot(A1, A1), ufl.dot(A1, A2), ufl.dot(A1, A3)],
         [ufl.dot(A2, A1), ufl.dot(A2, A2), ufl.dot(A2, A3)],
         [ufl.dot(A3, A1), ufl.dot(A3, A2), ufl.dot(A3, A3)]
-    ])  # Reference metric
+    ]) 
+    G_v_inv = ufl.inv(G_v)  
+    # += [DEFORMED] Metric covariant tensors
     g_v = ufl.as_tensor([
         [ufl.dot(F * A1, F * A1), ufl.dot(F * A1, F * A2), ufl.dot(F * A1, F * A3)],
         [ufl.dot(F * A2, F * A1), ufl.dot(F * A2, F * A2), ufl.dot(F * A2, F * A3)],
         [ufl.dot(F * A3, F * A1), ufl.dot(F * A3, F * A2), ufl.dot(F * A3, F * A3)]
-    ])  # Reference metric
-    # g_v = ufl.as_tensor(ufl.dot(a_v[i], a_v[j]), (i, j))  # Deformed metric
-
-    G_v_inv = ufl.inv(G_v)  
+    ])
     g_v_inv = ufl.inv(g_v)
 
-    # Christoffel symbols (using index notation)
+    # += Christoffel symbols 
     Gamma = ufl.as_tensor(
         0.5 * G_v_inv[k, l] * (ufl.grad(G_v[j, l])[i] + ufl.grad(G_v[i, l])[j] - ufl.grad(G_v[i, j])[l]),
         (i, j, k)
     )
 
-    # Covariant derivative of test function
+    # += Covariant derivative
     covDev = ufl.as_tensor(ufl.grad(v)[i, j] + Gamma[i, k, j] * v[k], (i, j))
 
-    # Kinematic tensors
-    C = ufl.variable(F.T * F)  # Right Cauchy-Green tensor
-    B = ufl.variable(F * F.T)  # Left Cauchy-Green tensor
-    E_v = 0.5 * (g_v - G_v)    # Green-Lagrange strain
-    J = ufl.det(F)             # Jacobian determinant
+    # += Kinematics 
+    C = ufl.variable(F.T * F)  
+    B = ufl.variable(F * F.T)  
+    E_v = 0.5 * (g_v - G_v)    
+    J = ufl.det(F)             
 
-    # e1 = ufl.as_vector([[
-    #     ufl.cos(azi) * ufl.cos(ele),
-    #     ufl.sin(azi) * ufl.cos(ele),
-    #     ufl.sin(ele)
-    # ]])
+    # += Basis for Cauchy
     e1 = ufl.as_tensor([[1.0, 0.0, 0.0]]) 
     e2 = ufl.as_tensor([[0.0, 1.0, 0.0]]) 
     I4e1 = ufl.inner(e1 * C, e1)
     I4e2 = ufl.inner(e2 * C, e2)
     I8e1e2 = ufl.inner(e1 * C, e2)  
 
-    reg = 1e-6  # Small stabilizer
-
-    # cond = lambda a: ufl.conditional(a > 0, a, 0)
-
-    # e1 = df.as_vector([1.0, 0.0, 0.0])
-
-    # J = df.det(F)
-    # C = pow(J, -float(2) / 3) * F.T * F
-
-    # IIFx = df.tr(C)
-    # I4e1 = df.inner(C * e1, e1)
-
-    # W_hat = a / (2 * b) * (df.exp(b * (IIFx - 3)) - 1)
-    # W_f = a_f / (2 * b_f) * (df.exp(b_f * cond(I4e1 - 1) ** 2) - 1)
-    
+    # += Stretch condition
+    reg = 1e-6  
     cond = lambda a: ufl.conditional(a > reg + 1, a, 0)
 
+    # += Stress
     # sig = (
     #     HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
     #     2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0]) +
@@ -403,18 +371,13 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
         2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0])
     )
     piola = J * sig * ufl.inv(F.T) + p * ufl.inv(G_v) * J * ufl.inv(F.T)
-    term = ufl.as_tensor(piola[a, b] * F[j, b] * covDev[j, a])
 
-    # += Solver Setup
-    print("\t" * depth + "+= Setup Solver")
-    metadata = {"quadrature_degree": QUADRATURE}
-    dx = ufl.Measure(integral_type="dx", domain=domain, metadata=metadata)
-    R = term * dx + q * (J - 1) * dx
+    # += Residual and Solver
+    print("\t" * depth + "+= Setup Solver and Residual")
+    dx = ufl.Measure(integral_type="dx", domain=domain, metadata={"quadrature_degree": QUADRATURE})
+    R = ufl.as_tensor(piola[a, b] * F[j, b] * covDev[j, a]) * dx + q * (J - 1) * dx
 
-    # log.set_log_level(log.LogLevel.INFO)
-
-    # += Boundary Conditions
-    print("\t" * depth + "+= Setup Boundary Conditions")
+    log.set_log_level(log.LogLevel.INFO)
 
     # += Data functions for exporting with setup
     print("\t" * depth + "+= Setup Export Functions for Data Storage")
@@ -428,85 +391,20 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
     sig.name = "S - Cauchy Stress"
     # += File setup
     file = os.path.dirname(os.path.abspath(__file__)) + "/_bp/"
-    dis_file = io.VTXWriter(MPI.COMM_WORLD, file + "/DISP/_" + tnm + "_" + str(msh_ref) + "_" + str(pct) + ".bp", dis, engine="BP4")
-    azi_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_AZI/_" + tnm + "_" + str(msh_ref) + ".bp", azi, engine="BP4")
-    # ele_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_ELE/_" + tnm + "_" + str(msh_ref) + ".bp", ele, engine="BP4")
-    sig_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_SIG/_" + tnm + "_" + str(msh_ref) + "_" + str(pct) + ".bp", sig, engine="BP4")
-    eps_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_EPS/_" + tnm + "_" + str(msh_ref) + "_" + str(pct) + ".bp", eps, engine="BP4")
+    dis_file = io.VTXWriter(MPI.COMM_WORLD, file + "/DISP/_" + tnm + "_" + str(msh_ref).replace(".","") + "_" + str(pct) + ".bp", dis, engine="BP4")
+    azi_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_AZI/_" + tnm + "_" + str(msh_ref).replace(".","") + ".bp", azi, engine="BP4")
+    ele_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_ELE/_" + tnm + "_" + str(msh_ref).replace(".","") + ".bp", ele, engine="BP4")
+    sig_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_SIG/_" + tnm + "_" + str(msh_ref).replace(".","") + "_" + str(pct) + ".bp", sig, engine="BP4")
+    eps_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_EPS/_" + tnm + "_" + str(msh_ref).replace(".","") + "_" + str(pct) + ".bp", eps, engine="BP4")
 
-    # disp = CUBE["x"] * PXLS["x"] * (pct / 100) 
-    # bc = dir_bc(Mxs, Vx, Vy, Vz, ft, n_tg, l_tg, disp, depth)
-
-    # # += Nonlinear Solver
-    # print("\t" * depth + "+= Solve ...")
-    # problem = NonlinearProblem(R, mx, bc)
-    # solver = NewtonSolver(domain.comm, problem)
-    # solver.atol = TOL
-    # solver.rtol = TOL
-    # solver.convergence_criterion = "incremental"
-
-    # # +==+==+
-    # # Solution and Output
-    # # += Solve
-    # try:
-    #     num_its, converged = solver.solve(mx)
-    #     print("\t" * depth + " ... converged in {} its".format(num_its))
-    # except:
-    #     print("\t" * depth + " ... not converged")
-    #     return None
-    
-    # # += Evaluate values
-    # print("\t" * depth + "+= Evaluate Tensors")
-    # u_eval = mx.sub(0).collapse()
-    # p_eval = mx.sub(1).collapse()
-    # dis.interpolate(u_eval)
-    # # += Setup tensor space for stress tensor interpolation
-    # cauchy = Expression(
-    #     e=cauchy_tensor(u_eval, p_eval, x, azi, ele, depth), 
-    #     X=Tes.element.interpolation_points()
-    # )
-    # epsilon = Expression(
-    #     e=green_tensor(u_eval, depth), 
-    #     X=Tes.element.interpolation_points()
-    # )
-    # sig.interpolate(cauchy)
-    # eps.interpolate(epsilon)
-    # # += Reposition tensors for output
-    # n_comps = 9
-    # sig_arr, eps_arr = sig.x.array, eps.x.array
-    # n_nodes = len(sig_arr) // n_comps
-    # r_sig = sig_arr.reshape((n_nodes, n_comps))
-    # r_eps = eps_arr.reshape((n_nodes, n_comps))
-
-    # # += Coordinates
-    # coords = np.array(x_n.function_space.tabulate_dof_coordinates()[:])
-    # df = pd.DataFrame(
-    #     data={
-    #         "X": coords[:, 0], "Y": coords[:, 1], "Z": coords[:, 2],
-    #         "sig_xx": r_sig[:, 0], "sig_yy": r_sig[:, 4], "sig_zz": r_sig[:, 8],
-    #         "sig_xy": r_sig[:, 1], "sig_xz": r_sig[:, 2], "sig_yz": r_sig[:, 5],
-    #         "eps_xx": r_eps[:, 0], "eps_yy": r_eps[:, 4], "eps_zz": r_eps[:, 8],
-    #         "eps_xy": r_eps[:, 1], "eps_xz": r_eps[:, 2], "eps_yz": r_eps[:, 5],
-    #         "Azimuth": azi.x.array[:], "Elevation": ele.x.array[:],
-    #     }
-    # )
-
-    # # Save CSV
-    # csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_csv", f"{tnm}_{msh_ref}_15.csv")
-    # df.to_csv(csv_path)   
-
-    # # += Finish
-    # print("\t" * depth + "+= Close and End")
-    # # += Write files
-    # dis_file.write(0)
-    # azi_file.write(0)
-    # # ele_file.write(0)
-    # sig_file.write(0)
-    # eps_file.write(0)
-    v = np.arange(0,21,1)
+    # += Shape iteration
+    v = np.arange(0,pct+1,1)
     for k, p in enumerate(v):
-        disp = CUBE["x"] * PXLS["x"] * (p / 100) 
-        bc = dir_bc(Mxs, Vx, Vy, Vz, ft, n_tg, l_tg, disp, depth)
+        disp = CUBE["x"] * PXLS["x"] * ((pct-p) / 100) 
+        if s:
+            bc = dir_bc(Mxs, Vx, Vy, Vz, ft, n_tg, l_tg, -disp, depth)
+        else:
+            bc = dir_bc(Mxs, Vx, Vy, Vz, ft, n_tg, l_tg, disp, depth)
 
         # += Nonlinear Solver
         print("\t" * depth + "+= Solve ...")
@@ -519,12 +417,8 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
         # +==+==+
         # Solution and Output
         # += Solve
-        try:
-            num_its, converged = solver.solve(mx)
-            print("\t" * depth + " ... converged in {} its".format(num_its))
-        except:
-            print("\t" * depth + " ... not converged")
-            continue
+        num_its, converged = solver.solve(mx)
+        print("\t" * depth + " ... converged in {} its".format(num_its))
         
         # += Evaluate values
         print("\t" * depth + "+= Evaluate Tensors")
@@ -563,50 +457,25 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
         )
 
         # Save CSV
-        csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_csv", f"{tnm}_{msh_ref}_{p}.csv")
+        if s:
+            csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_csv", f"{tnm}_{int(msh_ref)}_{pct-p}_s.csv")
+        else:
+            csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_csv", f"{tnm}_{int(msh_ref)}_{pct-p}.csv")
         df.to_csv(csv_path)  
-
-        # points = np.array([[9000, 9000, 4000], [9000, 2000, 1000], [2000, 9000, 4000], [2000, 2000, 1000]])
-        # bb_tree = geometry.bb_tree(domain, domain.topology.dim)
-        # cells = []
-        # points_on_proc = []
-        # # Find cells whose bounding-box collide with the the points
-        # cell_candidates = geometry.compute_collisions_points(bb_tree, points)
-        # # Choose one of the cells that contains the point
-        # colliding_cells = geometry.compute_colliding_cells(domain, cell_candidates, points)
-        # for i, point in enumerate(points):
-        #     if len(colliding_cells.links(i)) > 0:
-        #         points_on_proc.append(point)
-        #         cells.append(colliding_cells.links(i)[0])
-
-        # r_sig = sig.eval(points_on_proc, cells)
-        # r_eps = eps.eval(points_on_proc, cells)
-
-        # df = pd.DataFrame(
-        #     data={
-        #         "sig_xx": r_sig[:, 0], "sig_yy": r_sig[:, 4], "sig_zz": r_sig[:, 8],
-        #         "sig_xy": r_sig[:, 1], "sig_xz": r_sig[:, 2], "sig_yz": r_sig[:, 5],
-        #         "eps_xx": r_eps[:, 0], "eps_yy": r_eps[:, 4], "eps_zz": r_eps[:, 8],
-        #         "eps_xy": r_eps[:, 1], "eps_xz": r_eps[:, 2], "eps_yz": r_eps[:, 5]
-        #     }
-        # )
-
-        # # Save CSV
-        # csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_csv", f"{tnm}_{msh_ref}_rt.csv")
-        # df.to_csv(csv_path)  
 
         # += Finish
         print("\t" * depth + "+= Close and End")
         # += Write files
         dis_file.write(k)
-        azi_file.write(k)
-        # ele_file.write(0)
         sig_file.write(k)
         eps_file.write(k)
+
+    azi_file.write(0)
+    ele_file.write(0)
     # += Close files
     dis_file.close()
     azi_file.close()
-    # ele_file.close()
+    ele_file.close()
     sig_file.close()
     eps_file.close()
 
@@ -619,7 +488,7 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
 #       msh  | bool | indicator of mesh generation style
 #   Outputs:
 #       .bp folder of deformation
-def main(emfs, msh_ref, depth):
+def main(emfs, msh_ref, s, depth):
     depth += 1
     # += Run Mechanics\
     l_tg = {
@@ -640,10 +509,8 @@ def main(emfs, msh_ref, depth):
         # += Enter FENICS
         converged = 0
         i = 0
-        # file = f'/Users/murrayla/Documents/main_PhD/FEniCSx/FEniCSx/P_Passive_Contraction/_msh/EMGEO_{msh_ref}_{emf}.msh'
-        file = f'/Users/murrayla/Documents/main_PhD/FEniCSx/FEniCSx/P_Passive_Contraction/_msh/EMGEO_{msh_ref}.msh'
-        # its = fx_(emf, file, msh_ref, n_tg, l_tg, 10, depth)
-
+        file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_msh/EMGEO_" + str(msh_ref).replace(".","") + ".msh")
+        # its = fx_(emf, file, msh_ref, n_tg, l_tg, 20, s, depth)
         while converged != 1:
             pct = (20 - i)
             if i > 20:
@@ -651,7 +518,7 @@ def main(emfs, msh_ref, depth):
                 f.append(emf)
                 converged = 1
                 break
-            its = fx_(emf, file, msh_ref, n_tg, l_tg, pct, depth)
+            its = fx_(emf, file, msh_ref, n_tg, l_tg, pct, s, depth)
             if its:
                 s.append(emf)
                 print("\t" * depth + "!! TEST PASS: " + emf + " !!")
@@ -668,12 +535,19 @@ def main(emfs, msh_ref, depth):
 if __name__ == '__main__':
     depth = 0
     # += Arguments
-    # msh_ref = 2200
-    msh_ref = [500]
-    # emfs = [x for x in [str(y) for y in range(0, 36, 1)]]
-    # emfs = [x for x in ["0", "2", "5"]]# + [str(y) for y in [0, 2, 5, 6, 7, 9, 10, 11, 18, 26, 29, 31]]]
-    # emfs = ["seg_" + x for x in [str(y) for y in range(0, 36, 1)]]
-    emfs = [x for x in [str(y) for y in ["test"]]]
-    for i in msh_ref:
-        main(emfs, i, depth)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-n", "--test_num",type=str)
+    parser.add_argument("-a", "--all_test",type=int)
+    parser.add_argument("-r", "--ref_level",type=float)
+    parser.add_argument("-s", "--test_type",type=float)
+    args = parser.parse_args()
+    n = args.test_num
+    a = args.all_test
+    r = args.ref_level
+    s = args.test_type
+    if a == 0:
+        emfs = [n]
+    elif a == 1:
+        emfs = [x for x in ["test"] + [str(y) for y in range(0, 36, 1)]]
+    main(emfs, r, s, depth)
     
