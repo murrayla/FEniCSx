@@ -190,8 +190,8 @@ if __name__ == '__main__':
     print("\t" * depth + "!! MESHING !!") 
     tnm = "EMGEO_"
     parser = argparse.ArgumentParser()
-    parser.add_argument("-s", "--mesh_size",type=float)
-    parser.add_argument("-b", "--test_type",type=float)
+    parser.add_argument("-s", "--mesh_size",type=int)
+    parser.add_argument("-b", "--test_type",type=int)
     args = parser.parse_args()
     s = args.mesh_size
     b = args.test_type

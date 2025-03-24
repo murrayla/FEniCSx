@@ -15,11 +15,43 @@ import ast
 import argparse
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 import multiprocessing as mp
 
 # += Parameters
 PXLS = {"x": 11, "y": 11, "z": 50}
+
+def average_angle_whole(n_id, f, cart, azi, ele, depth):
+    depth += 1
+
+    n_df = pd.read_csv(os.path.dirname(os.path.abspath(__file__)) + "/_csv/z_pos.csv")
+    big_df = pd.read_csv(os.path.dirname(os.path.abspath(__file__)) + "/_csv/all_rot_filt.csv")
+
+    id = np.array(n_df["ID"])
+    cur = np.array([ast.literal_eval(row) for row in n_df["Node"]])
+    cur = cur * np.array([11, 11, 50])
+    cart[:, 0] -= 600
+    cart[:, 1] -= 1940
+
+    # += Isolate a node
+    for j, pos in enumerate(cart):
+        dis = np.linalg.norm(cur - pos, axis=1)
+        idx = np.argmin(dis)
+        n = id[idx]
+        idx_n = np.where(big_df["ID"] == n)[0][0]
+        if dis[idx] < 2000:
+            azi[j] = big_df["Azi_[RAD]"][idx_n]
+            ele[j] = big_df["Azi_[RAD]"][idx_n]
+        else:
+            azi[j] = 0.0
+            ele[j] = 0.0
+    # += Save to dataframe
+    pd.DataFrame(
+        data={
+            "n": n_id,
+            "a": azi,
+            "e": ele
+        }
+    ).to_csv(os.path.dirname(os.path.abspath(__file__)) + "/_csv/vals_EMGEO_BIG.csv".format(f), index=False)
 
 def average_angle(n_id, f, cart, azi, ele, i, depth):
     depth += 1
@@ -48,7 +80,7 @@ def average_angle(n_id, f, cart, azi, ele, i, depth):
         }
     ).to_csv(os.path.dirname(os.path.abspath(__file__)) + "/_csv/vals_{}_{}.csv".format(f, i), index=False)
 
-def angle_assign(file, depth):
+def angle_assign(file, b, depth):
     depth += 1
     print("\t" * depth + "~> Begin anistropic node assignment")
 
@@ -67,10 +99,12 @@ def angle_assign(file, depth):
     ele = np.full_like(n_id, 0)
 
     # += Iterate each region
-    d_df = pd.read_csv(os.path.dirname(os.path.abspath(__file__)) + "/_csv/DiaRegions.csv")
-
-    with mp.Pool(processes=mp.cpu_count()) as pool:
-        pool.starmap(average_angle, [(n_id, file, cart, azi, ele, i, depth) for i, _ in d_df.iterrows()])
+    if b:
+        average_angle_whole(n_id, f, cart, azi, ele, depth)
+    else:
+        d_df = pd.read_csv(os.path.dirname(os.path.abspath(__file__)) + "/_csv/DiaRegions.csv")
+        with mp.Pool(processes=mp.cpu_count()) as pool:
+            pool.starmap(average_angle, [(n_id, file, cart, azi, ele, i, depth) for i, _ in d_df.iterrows()])
 
 # +==+==+==+
 # mesh_nodes
@@ -167,12 +201,12 @@ def mesh_nodes(f, enum, depth):
 # main
 #   Input(s): 
 #   Output(s): 
-def main(tnm, depth):
+def main(tnm, b, depth):
     depth += 1
     # += Output node positional data
     print("\t" * depth + "+= Output node data")
     mesh_nodes(tnm, 11, depth)
-    angle_assign(tnm, depth)
+    angle_assign(tnm, b, depth)
 
 # +==+==+
 # Main check for script operation.
@@ -184,6 +218,8 @@ if __name__ == '__main__':
     # += Feed Main()
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--test_name",type=str)
+    parser.add_argument("-b", "--test_type",type=int)
     args = parser.parse_args()
     tnm = args.test_name
-    main(tnm, depth)
+    b = args.test_type
+    main(tnm, b, depth)

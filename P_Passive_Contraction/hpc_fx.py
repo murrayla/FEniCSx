@@ -19,8 +19,8 @@ from basix.ufl import element, mixed_element
 from mpi4py import MPI
 import pandas as pd
 import numpy as np
-import argparse
-import basix
+# import argparse
+# import basix
 import ufl
 import os
 # += Parameters
@@ -28,7 +28,7 @@ DIM = 3
 INC = 10
 I_0 = 0
 F_0 = 0.0 
-TOL = 1e-6
+TOL = 1e-5
 ZDISC = 5 
 ZLINE = 14
 ORDER = 2 
@@ -92,11 +92,16 @@ def cauchy_tensor(u, p, x, azi, ele, depth):
     
     cond = lambda a: ufl.conditional(a > reg + 1, a, 0)
 
+    # sig = (
+    #     HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
+    #     2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0]) +
+    #     2 * HLZ_CONS[4] * cond(I4e2 - 1) * (ufl.exp(HLZ_CONS[5] * cond(I4e2 - 1) ** 2) - 1) * ufl.outer(e2[0], e2[0]) +
+    #     HLZ_CONS[6] * I8e1e2 * ufl.exp(HLZ_CONS[7] * (I8e1e2**2)) * (ufl.outer(e1[0], e2[0]) + ufl.outer(e2[0], e1[0]))
+    # )
+
     sig = (
         HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
-        2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0]) +
-        2 * HLZ_CONS[4] * cond(I4e2 - 1) * (ufl.exp(HLZ_CONS[5] * cond(I4e2 - 1) ** 2) - 1) * ufl.outer(e2[0], e2[0]) +
-        HLZ_CONS[6] * I8e1e2 * ufl.exp(HLZ_CONS[7] * (I8e1e2**2)) * (ufl.outer(e1[0], e2[0]) + ufl.outer(e2[0], e1[0]))
+        2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0])
     )
     return sig
     
@@ -122,54 +127,6 @@ def green_tensor(u, depth):
         [E[2, 0], E[2, 1], E[2, 2]]
     ])
     return eps
-
-"""
-dir_bc
-  Inputs: 
-      mix_vs  | obj | mixed vector space
-      Vx, Vy, Vz | obj | collapsed vector spaces
-      ft | np_array | facet tag data
-      du | float | displacement value
-  Outputs:
-      numpy array of boudnary condition assignment data
-"""
-def dir_bc(mix_vs, Vx, Vy, Vz, ft, n_tg, l_tg, du, depth):
-    depth += 1
-    print("\t" * depth + "~> Apply boundary conditions")
-
-    # += Tags
-    tgs_x0 = ft.find(n_tg[2][np.where(np.array(l_tg[2]) == "Surface_x0")[0][0]])
-    tgs_x1 = ft.find(n_tg[2][np.where(np.array(l_tg[2]) == "Surface_x1")[0][0]])
-
-    # += Locate subdomain dofs
-    xx0_dofs = locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=tgs_x0)
-    xx1_dofs = locate_dofs_topological(V=(mix_vs.sub(0).sub(X), Vx), entity_dim=ft.dim, entities=tgs_x1)
-    yx0_dofs = locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=tgs_x0)
-    yx1_dofs = locate_dofs_topological(V=(mix_vs.sub(0).sub(Y), Vy), entity_dim=ft.dim, entities=tgs_x1)
-    zx0_dofs = locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=tgs_x0)
-    zx1_dofs = locate_dofs_topological(V=(mix_vs.sub(0).sub(Z), Vz), entity_dim=ft.dim, entities=tgs_x1)
-
-    # += Interpolate 
-    uxx0, uxx1, uyx0, uyx1, uzx0, uzx1 = Function(Vx), Function(Vx), Function(Vy), Function(Vy), Function(Vz), Function(Vz)
-    uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du//2)))
-    uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-du//2)))
-    uyx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-    uyx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-    uzx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-    uzx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
-
-    # += Dirichlet Boundary Conditions
-    bc_UxX0 = dirichletbc(value=uxx0, dofs=xx0_dofs, V=mix_vs.sub(0).sub(X))
-    bc_UxX1 = dirichletbc(value=uxx1, dofs=xx1_dofs, V=mix_vs.sub(0).sub(X))
-    bc_UyX0 = dirichletbc(value=uyx0, dofs=yx0_dofs, V=mix_vs.sub(0).sub(Y))
-    bc_UyX1 = dirichletbc(value=uyx1, dofs=yx1_dofs, V=mix_vs.sub(0).sub(Y))
-    bc_UzX0 = dirichletbc(value=uzx0, dofs=zx0_dofs, V=mix_vs.sub(0).sub(Z))
-    bc_UzX1 = dirichletbc(value=uzx1, dofs=zx1_dofs, V=mix_vs.sub(0).sub(Z))
-
-    # += Assign
-    bc = [bc_UxX0, bc_UxX1, bc_UyX0, bc_UyX1, bc_UzX0, bc_UzX1]
-    
-    return bc
 
 """
 laplacian
@@ -213,9 +170,9 @@ def anistropic(tnm, msh_ref, azi_vals, ele_vals, x_n, depth):
 
     # += Load
     nmb = tnm.split("_")[0]
-    ang_df = pd.read_csv("P_Passive_Contraction/_csv/vals_{}_{}.csv".format("EMGEO_" + str(msh_ref), nmb))
+    ang_df = pd.read_csv(os.path.dirname(os.path.abspath(__file__)) + "_csv/vals_{}_{}.csv".format("EMGEO_" + str(msh_ref), nmb))
     n_list = []
-    f = "/Users/murrayla/Documents/main_PhD/FEniCSx/FEniCSx/P_Passive_Contraction/_msh/" + "EMGEO_" + str(msh_ref) + "_mesh.nodes"
+    f = os.path.dirname(os.path.abspath(__file__)) + "_msh/" + "EMGEO_" + str(msh_ref) + "_mesh.nodes"
 
     # += Generate node coordinates
     for line in open(f, 'r'):
@@ -259,30 +216,39 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
     # += Domain Setup
     print("\t" * depth + "+= Load Mesh and Setup Vector Spaces")
     domain, ct, ft = io.gmshio.read_from_msh(filename=file, comm=MPI.COMM_WORLD, rank=0, gdim=DIM)
-    V2 = element(family="Lagrange", cell=domain.basix_cell(), degree=ORDER, shape=(domain.geometry.dim,))
-    V1 = element(family="Lagrange", cell=domain.basix_cell(), degree=ORDER-1)
-    Mxs = functionspace(mesh=domain, element=mixed_element([V2, V1]))
+    P2 = element("Lagrange", domain.basix_cell(), ORDER, shape=(domain.geometry.dim,))
+    P1 = element("Lagrange", domain.basix_cell(), ORDER-1)
+    Mxs = functionspace(domain, mixed_element([P2, P1]))
     Tes = functionspace(mesh=domain, element=("Lagrange", ORDER, (DIM, DIM)))
 
     # += Extract subdomains for dofs
     print("\t" * depth + "+= Extract Subdomains")
     V, _ = Mxs.sub(0).collapse()
-    Vx, dofsX = V.sub(X).collapse()
-    Vy, dofsY = V.sub(Y).collapse()
-    Vz, dofsZ = V.sub(Z).collapse()
+    V0 = Mxs.sub(0)
+    V0x, _ = V0.sub(X).collapse()
+    V0y, _ = V0.sub(Y).collapse()
+    V0z, _ = V0.sub(Z).collapse()
     
     # += Anistropic setup
     print("\t" * depth + "+= Setup Anistropy")
     x = ufl.SpatialCoordinate(domain)
     x_n = Function(V)
-    azi, ele = Function(Vx), Function(Vy)
+    ori = Function(V)
+    azi, ele = Function(V0x), Function(V0y)
     azi_vals = np.full_like(azi.x.array[:], F_0, dtype=default_scalar_type)
     ele_vals = np.full_like(ele.x.array[:], F_0, dtype=default_scalar_type)
-    if tnm.split("_")[0] == "test":
+    if tnm == "test":
         azi.x.array[:] = azi_vals
         ele.x.array[:] = ele_vals
     else:
         azi.x.array[:], ele.x.array[:] = anistropic(tnm, msh_ref, azi_vals, ele_vals, x_n, depth)
+
+    # += Compute unit vector from azi/ele
+    ori_arr = ori.x.array.reshape(-1, 3)
+    ori_arr[:, 0] = np.cos(ele.x.array) * np.cos(azi.x.array) 
+    ori_arr[:, 1] = np.cos(ele.x.array) * np.sin(azi.x.array) 
+    ori_arr[:, 2] = np.sin(ele.x.array) 
+    ori.x.array[:] = ori_arr.reshape(-1)
 
     # += Create Push matrix
     R_azi = ufl.as_matrix([
@@ -325,6 +291,7 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
         [ufl.dot(A3, A1), ufl.dot(A3, A2), ufl.dot(A3, A3)]
     ]) 
     G_v_inv = ufl.inv(G_v)  
+
     # += [DEFORMED] Metric covariant tensors
     g_v = ufl.as_tensor([
         [ufl.dot(F * A1, F * A1), ufl.dot(F * A1, F * A2), ufl.dot(F * A1, F * A3)],
@@ -359,17 +326,19 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
     reg = 1e-6  
     cond = lambda a: ufl.conditional(a > reg + 1, a, 0)
 
-    # += Stress
+    # # += Stress
     # sig = (
     #     HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
     #     2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0]) +
     #     2 * HLZ_CONS[4] * cond(I4e2 - 1) * (ufl.exp(HLZ_CONS[5] * cond(I4e2 - 1) ** 2) - 1) * ufl.outer(e2[0], e2[0]) +
     #     HLZ_CONS[6] * I8e1e2 * ufl.exp(HLZ_CONS[7] * (I8e1e2**2)) * (ufl.outer(e1[0], e2[0]) + ufl.outer(e2[0], e1[0]))
     # )
+
     sig = (
         HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
         2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0])
     )
+    
     piola = J * sig * ufl.inv(F.T) + p * ufl.inv(G_v) * J * ufl.inv(F.T)
 
     # += Residual and Solver
@@ -381,8 +350,7 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
 
     # += Data functions for exporting with setup
     print("\t" * depth + "+= Setup Export Functions for Data Storage")
-    Vu_sol, up_to_u_sol = Mxs.sub(0).collapse() 
-    dis = Function(Vu_sol) 
+    dis = Function(V) 
     sig = Function(Tes)
     eps = Function(Tes)
     # += Label Functions
@@ -391,20 +359,42 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
     sig.name = "S - Cauchy Stress"
     # += File setup
     file = os.path.dirname(os.path.abspath(__file__)) + "/_bp/"
-    dis_file = io.VTXWriter(MPI.COMM_WORLD, file + "/DISP/_" + tnm + "_" + str(msh_ref).replace(".","") + "_" + str(pct) + ".bp", dis, engine="BP4")
-    azi_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_AZI/_" + tnm + "_" + str(msh_ref).replace(".","") + ".bp", azi, engine="BP4")
-    ele_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_ELE/_" + tnm + "_" + str(msh_ref).replace(".","") + ".bp", ele, engine="BP4")
-    sig_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_SIG/_" + tnm + "_" + str(msh_ref).replace(".","") + "_" + str(pct) + ".bp", sig, engine="BP4")
-    eps_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_EPS/_" + tnm + "_" + str(msh_ref).replace(".","") + "_" + str(pct) + ".bp", eps, engine="BP4")
+    dis_file = io.VTXWriter(MPI.COMM_WORLD, file + "/DISP/_" + tnm + "_" + str(msh_ref) + "_" + str(pct) + ".bp", dis, engine="BP4")
+    ori_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_ANG/_" + tnm + "_" + str(msh_ref) + "_" + str(pct) + ".bp", ori, engine="BP4")
+    sig_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_SIG/_" + tnm + "_" + str(msh_ref) + "_" + str(pct) + ".bp", sig, engine="BP4")
+    eps_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_EPS/_" + tnm + "_" + str(msh_ref) + "_" + str(pct) + ".bp", eps, engine="BP4")
+
+    def dir_bc(MX, V0, ft, n_tg, l_tg, du):
+        tgs_x0 = ft.find(n_tg[2][np.where(np.array(l_tg[2]) == "Surface_x0")[0][0]])
+        tgs_x1 = ft.find(n_tg[2][np.where(np.array(l_tg[2]) == "Surface_x1")[0][0]])
+        V0x, _ = V0.sub(X).collapse()
+        V0y, _ = V0.sub(Y).collapse()
+        V0z, _ = V0.sub(Z).collapse()
+        xx0_dofs = locate_dofs_topological(V=(MX.sub(0).sub(X), V0x), entity_dim=ft.dim, entities=tgs_x0)
+        xx1_dofs = locate_dofs_topological(V=(MX.sub(0).sub(X), V0x), entity_dim=ft.dim, entities=tgs_x1)
+        yx0_dofs = locate_dofs_topological(V=(MX.sub(0).sub(Y), V0y), entity_dim=ft.dim, entities=tgs_x0)
+        yx1_dofs = locate_dofs_topological(V=(MX.sub(0).sub(Y), V0y), entity_dim=ft.dim, entities=tgs_x1)
+        zx0_dofs = locate_dofs_topological(V=(MX.sub(0).sub(Z), V0z), entity_dim=ft.dim, entities=tgs_x0)
+        zx1_dofs = locate_dofs_topological(V=(MX.sub(0).sub(Z), V0z), entity_dim=ft.dim, entities=tgs_x1)
+        uxx0, uxx1, uyx0, uyx1, uzx0, uzx1 = Function(V0x), Function(V0x), Function(V0y), Function(V0y), Function(V0z), Function(V0z)
+        uxx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(-du//2)))
+        uxx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(du//2)))
+        uyx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+        uyx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+        uzx0.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+        uzx1.interpolate(lambda x: np.full(x.shape[1], default_scalar_type(F_0)))
+        bc_UxX0 = dirichletbc(value=uxx0, dofs=xx0_dofs, V=MX.sub(0).sub(X))
+        bc_UxX1 = dirichletbc(value=uxx1, dofs=xx1_dofs, V=MX.sub(0).sub(X))
+        bc_UyX0 = dirichletbc(value=uyx0, dofs=yx0_dofs, V=MX.sub(0).sub(Y))
+        bc_UyX1 = dirichletbc(value=uyx1, dofs=yx1_dofs, V=MX.sub(0).sub(Y))
+        bc_UzX0 = dirichletbc(value=uzx0, dofs=zx0_dofs, V=MX.sub(0).sub(Z))
+        bc_UzX1 = dirichletbc(value=uzx1, dofs=zx1_dofs, V=MX.sub(0).sub(Z))
+        return [bc_UxX0, bc_UxX1, bc_UyX0, bc_UyX1, bc_UzX0, bc_UzX1]
 
     # += Shape iteration
-    v = np.arange(0,pct+1,1)
-    for k, p in enumerate(v):
-        disp = CUBE["x"] * PXLS["x"] * ((pct-p) / 100) 
-        if s:
-            bc = dir_bc(Mxs, Vx, Vy, Vz, ft, n_tg, l_tg, -disp, depth)
-        else:
-            bc = dir_bc(Mxs, Vx, Vy, Vz, ft, n_tg, l_tg, disp, depth)
+    for k in range(0, pct+1, 1):
+
+        bc = dir_bc(Mxs, V0, ft, n_tg, l_tg, CUBE["x"] * PXLS["x"] * (k / 100))
 
         # += Nonlinear Solver
         print("\t" * depth + "+= Solve ...")
@@ -417,7 +407,7 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
         # +==+==+
         # Solution and Output
         # += Solve
-        num_its, converged = solver.solve(mx)
+        num_its, _ = solver.solve(mx)
         print("\t" * depth + " ... converged in {} its".format(num_its))
         
         # += Evaluate values
@@ -457,10 +447,7 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
         )
 
         # Save CSV
-        if s:
-            csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_csv", f"{tnm}_{int(msh_ref)}_{pct-p}_s.csv")
-        else:
-            csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_csv", f"{tnm}_{int(msh_ref)}_{pct-p}.csv")
+        csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_csv", f"{tnm}_{int(msh_ref)}_{pct-p}.csv")
         df.to_csv(csv_path)  
 
         # += Finish
@@ -470,12 +457,10 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
         sig_file.write(k)
         eps_file.write(k)
 
-    azi_file.write(0)
-    ele_file.write(0)
+    ori_file.write(0)
     # += Close files
     dis_file.close()
-    azi_file.close()
-    ele_file.close()
+    ori_file.close()
     sig_file.close()
     eps_file.close()
 
@@ -488,9 +473,9 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
 #       msh  | bool | indicator of mesh generation style
 #   Outputs:
 #       .bp folder of deformation
-def main(emfs, msh_ref, s, depth):
+def main(emfs, msh_ref, depth):
     depth += 1
-    # += Run Mechanics\
+    # += Run Mechanics
     l_tg = {
         0: ['Point_x0y0z1', 'Point_x0y0z0', 'Point_x0y1z1', 'Point_x0y1z0', 'Point_x1y0z1', 'Point_x1y0z0', 'Point_x1y1z1', 'Point_x1y1z0'], 
         1: ['Line_x0y0z', 'Line_x0yz1', 'Line_x0y1z', 'Line_x0yz0', 'Line_x1y0z', 'Line_x1yz1', 'Line_x1y1z', 'Line_x1yz0', 'Line_xy0z0', 'Line_xy0z1', 'Line_xy1z0', 'Line_xy1z1'], 
@@ -502,52 +487,42 @@ def main(emfs, msh_ref, s, depth):
         2: [1110, 1112, 1101, 1121, 1011, 1211], 
         3: [5, 6]
     }
-    s, f, v = [], [], []
+
+    s, f = [], []
     for emf in emfs:
         # += Run
         print("\t" * depth + "!! BEGIN TEST: " + emf + " !!")
         # += Enter FENICS
-        converged = 0
-        i = 0
-        file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_msh/EMGEO_" + str(msh_ref).replace(".","") + ".msh")
-        # its = fx_(emf, file, msh_ref, n_tg, l_tg, 20, s, depth)
-        while converged != 1:
-            pct = (20 - i)
-            if i > 20:
-                print("\t" * depth + "!! TEST FAIL: " + emf + " !!")
-                f.append(emf)
-                converged = 1
-                break
-            its = fx_(emf, file, msh_ref, n_tg, l_tg, pct, s, depth)
-            if its:
-                s.append(emf)
-                print("\t" * depth + "!! TEST PASS: " + emf + " !!")
-                converged = 1
-            else:
-                i += 1
-        v.append(pct)
+        file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_msh/EMGEO_" + str(msh_ref) + ".msh")
+        its = fx_(emf, file, msh_ref, n_tg, l_tg, 20, depth)
+        if its:
+            s.append(emf)
+            print("\t" * depth + "!! TEST PASS: " + emf + " !!")
+        else:
+            f.append(emf)
+            print("\t" * depth + "!! TEST FAIL: " + emf + " !!")
+                
     print("\t" * depth + "!! END !!") 
     print("\t" * depth + " ~> Pass: {}".format(s))
     print("\t" * depth + " ~> Fail: {}".format(f))
-    print(v)
 
 # +==+==+ Main Check
 if __name__ == '__main__':
     depth = 0
     # += Arguments
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-n", "--test_num",type=str)
-    parser.add_argument("-a", "--all_test",type=int)
-    parser.add_argument("-r", "--ref_level",type=float)
-    parser.add_argument("-s", "--test_type",type=float)
-    args = parser.parse_args()
-    n = args.test_num
-    a = args.all_test
-    r = args.ref_level
-    s = args.test_type
-    if a == 0:
-        emfs = [n]
-    elif a == 1:
-        emfs = [x for x in ["test"] + [str(y) for y in range(0, 36, 1)]]
-    main(emfs, r, s, depth)
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument("-n", "--test_num",type=str)
+    # parser.add_argument("-a", "--all_test",type=int)
+    # parser.add_argument("-r", "--ref_level",type=int)
+    # args = parser.parse_args()
+    # n = args.test_num
+    # a = args.all_test
+    # r = args.ref_level
+    # if a == 0:
+    #     emfs = [n]
+    # elif a == 1:
+    #     emfs = [x for x in [str(y) for y in range(0, 36, 1)]]
+    emfs = ["test"]
+    r = 1000
+    main(emfs, r, depth)
     
