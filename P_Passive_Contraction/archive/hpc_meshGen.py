@@ -11,6 +11,7 @@
 # Setup
 # += Imports
 import numpy as np
+import argparse
 import gmsh
 import os
 
@@ -50,53 +51,18 @@ PNT_NAM = [
 # +==+==+==+
 # msh_:
 #   Inputs: 
-#       n  | str | test name
+#       tnm  | str | test name
 #   Outputs:
 #       .msh file of mesh
 #       tg_c | dict | cytosol physical element data
 #       tg_S | dict | sarcomere physical element data
-def msh_(n, s, b, depth):
+def msh_(tnm, s, b, e_tg, p_tg, l_tg, depth):
     depth += 1
-    print("\t" * depth + "+= Generate Mesh: {}.msh".format(n + str(s)))
-
-    # += Dimensions
-    if b:
-        CUBE = {"x": 3900, "y": 1100, "z": 200}
-        n += "BIG_"
-    else:
-        CUBE = {"x": 1000, "y": 1000, "z": 100}
-    # += Constant
-    PXLS = {"x": 11, "y": 11, "z": 50}
-    EDGE = [PXLS[d]*CUBE[d] for d in ["x", "y", "z"]]
-    # += Centre of Masses
-    VOL = [(EDGE[0]/2, EDGE[1]/2, EDGE[2]/2)]
-    SUR = [
-        (F_0, EDGE[1]/2, EDGE[2]/2), (EDGE[0], EDGE[1]/2, EDGE[2]/2), 
-        (EDGE[0]/2, F_0, EDGE[2]/2), (EDGE[0]/2, EDGE[1], EDGE[2]/2), 
-        (EDGE[0]/2, EDGE[1]/2, F_0), (EDGE[0]/2, EDGE[1]/2, EDGE[2]) 
-    ]
-    LIN = [
-        (EDGE[0]/2, F_0, F_0), (EDGE[0]/2, F_0, EDGE[2]), 
-        (F_0, EDGE[1]/2, F_0), (EDGE[0], EDGE[1]/2, F_0),
-        (EDGE[0]/2, EDGE[1], F_0), (EDGE[0]/2, EDGE[1], EDGE[2]), 
-        (F_0, EDGE[1]/2, EDGE[2]), (EDGE[0], EDGE[1]/2, EDGE[2]),
-        (F_0, F_0, EDGE[2]/2), (F_0, EDGE[1], EDGE[2]/2), 
-        (EDGE[0], F_0, EDGE[2]/2), (EDGE[0], EDGE[1], EDGE[2]/2),
-    ]
-    PNT = [
-        (F_0, F_0, F_0), (EDGE[0], F_0, F_0), 
-        (F_0, EDGE[1], F_0), (F_0, F_0, EDGE[2]), 
-        (EDGE[0], EDGE[1], F_0), (EDGE[0], F_0, EDGE[2]), 
-        (F_0, EDGE[1], EDGE[2]), (EDGE[0], EDGE[1], EDGE[2])
-    ]
-    # += Tag Values
-    e_tg = {0: [1000], 1: [100], 2: [10], 3: [1]}
-    p_tg = {0: [5000], 1: [500], 2: [50], 3: [5]}
-    l_tg = {0: [], 1: [], 2: [], 3: []}
+    print("\t" * depth + "+= Generate Mesh: {}.msh".format(tnm + str(s)))
 
     # +==+ Initialise and begin geometry
     gmsh.initialize()
-    gmsh.model.add(n)
+    gmsh.model.add(tnm)
     
     # += Define Points
     pnt = []
@@ -198,7 +164,67 @@ def msh_(n, s, b, depth):
     gmsh.model.mesh.setOrder(order=ORDER) 
 
     # +==+ Write File
-    file = os.path.dirname(os.path.abspath(__file__)) + "/_msh/" + n + str(s).replace(".", "") + ".msh"
+    file = os.path.dirname(os.path.abspath(__file__)) + "/_msh/" + tnm + str(s).replace(".", "") + ".msh"
     gmsh.write(file)
     gmsh.finalize()
     return file, p_tg, l_tg
+
+# +==+==+==+
+# main
+#   Inputs: 
+#       tnm  | str | test name
+#   Outputs:
+#       .bp folder of deformation
+def main(tnm, s, b, depth):
+    depth += 1
+    # += Tag Values
+    ELM_TGS = {0: [1000], 1: [100], 2: [10], 3: [1]}
+    PHY_TGS = {0: [5000], 1: [500], 2: [50], 3: [5]}
+    LAB_TGS = {0: [], 1: [], 2: [], 3: []}
+    # += Mesh generation
+    f, tg, l_tg = msh_(tnm, s, b, ELM_TGS, PHY_TGS, LAB_TGS, depth)
+    
+# +==+==+ Main Check
+if __name__ == '__main__':
+    depth = 0
+    print("\t" * depth + "!! MESHING !!") 
+    tnm = "EMGEO_"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-s", "--mesh_size",type=int)
+    parser.add_argument("-b", "--test_type",type=int)
+    args = parser.parse_args()
+    s = args.mesh_size
+    b = args.test_type
+    # += Dimension data
+    # += Per test
+    if b:
+        CUBE = {"x": 3900, "y": 1100, "z": 200}
+        tnm += "BIG_"
+    else:
+        CUBE = {"x": 1000, "y": 1000, "z": 100}
+    # += Constant
+    PXLS = {"x": 11, "y": 11, "z": 50}
+    EDGE = [PXLS[d]*CUBE[d] for d in ["x", "y", "z"]]
+    # += Centre of Masses
+    VOL = [(EDGE[0]/2, EDGE[1]/2, EDGE[2]/2)]
+    SUR = [
+        (F_0, EDGE[1]/2, EDGE[2]/2), (EDGE[0], EDGE[1]/2, EDGE[2]/2), 
+        (EDGE[0]/2, F_0, EDGE[2]/2), (EDGE[0]/2, EDGE[1], EDGE[2]/2), 
+        (EDGE[0]/2, EDGE[1]/2, F_0), (EDGE[0]/2, EDGE[1]/2, EDGE[2]) 
+    ]
+    LIN = [
+        (EDGE[0]/2, F_0, F_0), (EDGE[0]/2, F_0, EDGE[2]), 
+        (F_0, EDGE[1]/2, F_0), (EDGE[0], EDGE[1]/2, F_0),
+        (EDGE[0]/2, EDGE[1], F_0), (EDGE[0]/2, EDGE[1], EDGE[2]), 
+        (F_0, EDGE[1]/2, EDGE[2]), (EDGE[0], EDGE[1]/2, EDGE[2]),
+        (F_0, F_0, EDGE[2]/2), (F_0, EDGE[1], EDGE[2]/2), 
+        (EDGE[0], F_0, EDGE[2]/2), (EDGE[0], EDGE[1], EDGE[2]/2),
+    ]
+    PNT = [
+        (F_0, F_0, F_0), (EDGE[0], F_0, F_0), 
+        (F_0, EDGE[1], F_0), (F_0, F_0, EDGE[2]), 
+        (EDGE[0], EDGE[1], F_0), (EDGE[0], F_0, EDGE[2]), 
+        (F_0, EDGE[1], EDGE[2]), (EDGE[0], EDGE[1], EDGE[2])
+    ]
+    main(tnm, s, b, depth) 
+    

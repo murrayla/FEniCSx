@@ -14,7 +14,7 @@ from dolfinx import log, io,  default_scalar_type
 from dolfinx.fem import Function, FunctionSpace, dirichletbc, locate_dofs_topological, Expression
 from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
-from _meshGen import msh_
+from P_Passive_Contraction._meshGenOLD import msh_
 from mpi4py import MPI
 import pandas as pd
 import numpy as np
