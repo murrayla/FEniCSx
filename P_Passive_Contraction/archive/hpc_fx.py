@@ -155,7 +155,7 @@ def anistropic(tnm, msh_ref, azi_vals, ele_vals, x_n, depth):
 #       tg_S | dict | sarcomere physical element data
 #   Outputs:
 #       .bp folder of deformation
-def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
+def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, s, depth):
     depth += 1
     print("\t" * depth + "+= Begin FE")
 
@@ -292,7 +292,7 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
     dx = ufl.Measure(integral_type="dx", domain=domain, metadata={"quadrature_degree": QUADRATURE})
     R = ufl.as_tensor(piola[a, b] * F[j, b] * covDev[j, a]) * dx + q * (J - 1) * dx
 
-    # log.set_log_level(log.LogLevel.INFO)
+    log.set_log_level(log.LogLevel.INFO)
 
     # += Data functions for exporting with setup
     print("\t" * depth + "+= Setup Export Functions for Data Storage")
@@ -324,8 +324,12 @@ def fx_(tnm, file, msh_ref, n_tg, l_tg, pct, depth):
 
         du = CUBE["x"] * PXLS["x"] * (k / 100)
         
-        d_xx0 = dirichletbc(Constant(domain, default_scalar_type(du//2)), xx0, Mxs.sub(0).sub(X))
-        d_xx1 = dirichletbc(Constant(domain, default_scalar_type(-du//2)), xx1, Mxs.sub(0).sub(X))
+        if s:
+            d_xx0 = dirichletbc(Constant(domain, default_scalar_type(du//2)), xx0, Mxs.sub(0).sub(X))
+            d_xx1 = dirichletbc(Constant(domain, default_scalar_type(-du//2)), xx1, Mxs.sub(0).sub(X))
+        else:
+            d_xx0 = dirichletbc(Constant(domain, default_scalar_type(-du//2)), xx0, Mxs.sub(0).sub(X))
+            d_xx1 = dirichletbc(Constant(domain, default_scalar_type(du//2)), xx1, Mxs.sub(0).sub(X))
         d_yx0 = dirichletbc(Constant(domain, default_scalar_type(0)), yx0, Mxs.sub(0).sub(Y))
         d_yx1 = dirichletbc(Constant(domain, default_scalar_type(0)), yx1, Mxs.sub(0).sub(Y))
         d_zx0 = dirichletbc(Constant(domain, default_scalar_type(0)), zx0, Mxs.sub(0).sub(Z))
@@ -431,7 +435,7 @@ def main(emfs, msh_ref, depth):
         # += Enter FENICS
         file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_msh/EMGEO_" + str(msh_ref) + ".msh")
         try:
-            its = fx_(emf, file, msh_ref, n_tg, l_tg, 20, depth)
+            its = fx_(emf, file, msh_ref, n_tg, l_tg, 20, s, depth)
             s.append(emf)
             print("\t" * depth + "!! TEST PASS: " + emf + " !!")
         except:
