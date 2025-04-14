@@ -20,7 +20,7 @@ import ufl
 from mpi4py import MPI
 from basix.ufl import element, mixed_element
 from dolfinx import log, io,  default_scalar_type
-from dolfinx.fem import Function, functionspace, dirichletbc, locate_dofs_topological, locate_dofs_geometrical, Expression, element, Constant
+from dolfinx.fem import Function, functionspace, dirichletbc, locate_dofs_topological, locate_dofs_geometrical, Expression, Constant
 from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
 
@@ -484,6 +484,7 @@ def fx_(tnm, file, r, pct, s, depth):
 
     return num_its
 
+# ∆ Main
 def main(args):
     depth = 1
     print("\t" * depth + "!! BEGIN FE !!")
@@ -503,6 +504,7 @@ def main(args):
     # ∆ Plot
     plot_(args.test_num, args.ref_level, args.stretch_test, depth)
 
+# ∆ Inititate 
 if __name__ == '__main__':
     # parser = argparse.ArgumentParser()
     # parser.add_argument("-n", "--test_num", type=str)

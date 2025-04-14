@@ -1,146 +1,123 @@
-from dolfinx import log, io, default_scalar_type
-from dolfinx.fem import Function, functionspace, dirichletbc, locate_dofs_topological, Expression, Constant
+"""
+    Author: Murray, L, A.
+    Contact: murrayla@student.unimelb.edu.au
+             liam.a.murr@gmail.com
+    ORCID: https://orcid.org/0009-0003-9276-6627
+    File Name: fe_opti.py
+       parameter optimiser for fe script
+"""
+
+# ∆ Raw
+import os
+import random
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import multiprocessing
+import scipy.optimize as opt
+import matplotlib.pyplot as plt
+from scipy.optimize import differential_evolution
+
+# ∆ Dolfin
+import ufl
+from mpi4py import MPI
+from basix.ufl import element, mixed_element
+from dolfinx import log, io,  default_scalar_type
+from dolfinx.fem import Function, functionspace, dirichletbc, locate_dofs_topological, locate_dofs_geometrical, Expression, element, Constant
 from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
-from basix.ufl import element, mixed_element
-from mpi4py import MPI
-import pandas as pd
-import numpy as np
-import scipy.optimize as opt
-import ufl
-import os
+
+# ∆ Seed
+random.seed(17081993)
+
+# ∆ Global Constants
+DIM = 3
+ORDER = 2 
+TOL = 1e-5
+QUADRATURE = 4
+X, Y, Z = 0, 1, 2
+PXLS = {"x": 11, "y": 11, "z": 50}
+CUBE = {"x": 1000, "y": 1000, "z": 100}
+EDGE = [PXLS[d]*CUBE[d] for d in ["x", "y", "z"]]
     
-# += Calculate Strain
-def green_tensor(u, depth):
-    depth += 1
-    print("\t" * depth + "~> Calculate the values of green strain tensor")
-
-    I = ufl.variable(ufl.Identity(3))
-    F = ufl.variable(I + ufl.grad(u))
-    C = ufl.variable(F.T * F)
-    E = ufl.variable(0.5*(C-I))
-    eps = ufl.as_tensor([
-        [E[0, 0], E[0, 1], E[0, 2]], 
-        [E[1, 0], E[1, 1], E[1, 2]], 
-        [E[2, 0], E[2, 1], E[2, 2]]
-    ])
-
-    return eps
-
-# Modified cauchy_tensor function to accept HLZ_CONS as an argument
-def cauchy_tensor(u, HLZ_CONS, azi, ele, p, depth):
+# ∆ Cauchy
+def cauchy_tensor(u, HLZ_CONS, p, x, azi, ele, depth):
     depth += 1
     print("\t" * depth + "~> Calculate the values of cauchy stress tensor")
-
-    R_azi = ufl.as_matrix([
-        [ufl.cos(azi), -ufl.sin(azi), 0],
-        [ufl.sin(azi),  ufl.cos(azi), 0],
-        [0,             0,            1]
-    ])
-    R_ele = ufl.as_matrix([
-        [1, 0,             0],
-        [0, ufl.cos(ele), -ufl.sin(ele)],
-        [0, ufl.sin(ele),  ufl.cos(ele)]
-    ])
-    Push = R_azi * R_ele  
-    u_nu = Push * u
-    I = ufl.Identity(3)  
-    F = I + ufl.grad(u_nu) 
-    C = ufl.variable(F.T * F) 
+    
+    # ∆ Kinematics
+    I = ufl.Identity(DIM)  
+    F = I + ufl.grad(u)  
+    C = ufl.variable(F.T * F)  
     B = ufl.variable(F * F.T) 
-    J = ufl.det(F)
-    # e1 = ufl.as_tensor([[1.0, 0.0, 0.0]]) 
-    e1 = e1 = ufl.as_tensor([[
-        ufl.cos(azi) * ufl.cos(ele),
-        ufl.sin(azi) * ufl.cos(ele),
-        ufl.sin(ele)
-    ]])
-    I4e1 = ufl.inner(e1 * C, e1)
+
+    # ∆ Constitutive 
+    ff = ufl.as_tensor([[1.0, 0.0, 0.0]]) 
+    I4e1 = ufl.inner(ff * C, ff)
     reg = 1e-6 
     cond = lambda a: ufl.conditional(a > reg + 1, a, 0)
+
+    # ∆ Cauchy
     sig = (
         HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
-        2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0])
+        2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(ff[0], ff[0])
     )
 
     return sig
-
+    
+# ∆ Run simulation
 def run_simulation(HLZ_CONS, r, pct, s, tnm, env):
+    depth = 1
+
+    # ∆ Retain from environment setup
     domain = env["domain"]
     ft = env["ft"]
     Mxs = env["Mxs"]
     Tes = env["Tes"]
-    ORDER = env["order"]
-    QUADRATURE = env["quadrature"]
-    l_tg = {
-        0: ['Point_x0y0z1', 'Point_x0y0z0', 'Point_x0y1z1', 'Point_x0y1z0', 'Point_x1y0z1', 'Point_x1y0z0', 'Point_x1y1z1', 'Point_x1y1z0'], 
-        1: ['Line_x0y0z', 'Line_x0yz1', 'Line_x0y1z', 'Line_x0yz0', 'Line_x1y0z', 'Line_x1yz1', 'Line_x1y1z', 'Line_x1yz0', 'Line_xy0z0', 'Line_xy0z1', 'Line_xy1z0', 'Line_xy1z1'], 
-        2: ['Surface_x0', 'Surface_x1', 'Surface_y0', 'Surface_y1', 'Surface_z0', 'Surface_z1'], 
-        3: ['Volume']}
-    n_tg = {
-        0: [5000, 5001, 5002, 5003, 5004, 5005, 5006, 5007, 5008], 
-        1: [500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 512], 
-        2: [1110, 1112, 1101, 1121, 1011, 1211], 
-        3: [5, 6]
-    }
-    """Encapsulates the Dolfinx simulation and returns stress values."""
-    DIM = 3
-    X, Y, Z = 0, 1, 2
-    PXLS = {"x": 11, "y": 11, "z": 50}
-    CUBE = {"x": 1000, "y": 1000, "z": 100}
-    EDGE = [PXLS[d] * CUBE[d] for d in ["x", "y", "z"]]
-    depth = 0
 
+    # ∆ Subdomains
+    print("\t" * depth + "+= Extract Subdomains")
     V, _ = Mxs.sub(0).collapse()
     V0 = Mxs.sub(0)
     V0x, _ = V0.sub(X).collapse()
     V0y, _ = V0.sub(Y).collapse()
     V0z, _ = V0.sub(Z).collapse()
     
-    # += Anistropic setup
+    # ∆ Fibre field
     print("\t" * depth + "+= Setup Anistropy")
     x = ufl.SpatialCoordinate(domain)
     x_n = Function(V)
-    ori = Function(V)
     azi, ele = Function(V0x), Function(V0y)
-    azi_vals = np.full_like(azi.x.array[:], 0.0, dtype=default_scalar_type)
-    ele_vals = np.full_like(ele.x.array[:], 0.0, dtype=default_scalar_type)
+    azi_vals = np.full_like(azi.x.array[:], 0, dtype=default_scalar_type)
+    ele_vals = np.full_like(ele.x.array[:], 0, dtype=default_scalar_type)
     azi.x.array[:] = azi_vals
     ele.x.array[:] = ele_vals
 
-    # += Compute unit vector from azi/ele
-    ori_arr = ori.x.array.reshape(-1, 3)
-    ori_arr[:, 0] = np.cos(ele.x.array) * np.cos(azi.x.array) 
-    ori_arr[:, 1] = np.cos(ele.x.array) * np.sin(azi.x.array) 
-    ori_arr[:, 2] = np.sin(ele.x.array) 
-    ori.x.array[:] = ori_arr.reshape(-1)
+    # ∆ Variational terms
+    print("\t" * depth + "+= Setup Variables")
+    mx = Function(Mxs)
+    v, q = ufl.TestFunctions(Mxs)
+    u, p = ufl.split(mx)
 
-    # += Create Push matrix
-    R_azi = ufl.as_matrix([
+    # ∆ Fibre orientation push
+    Push = ufl.as_matrix([
         [ufl.cos(azi), -ufl.sin(azi), 0],
         [ufl.sin(azi),  ufl.cos(azi), 0],
         [0,             0,            1]
-    ])
-    R_ele = ufl.as_matrix([
+    ]) * ufl.as_matrix([
         [1, 0, 0],
         [0, ufl.cos(ele), -ufl.sin(ele)],
         [0, ufl.sin(ele),  ufl.cos(ele)]
     ])
-    Push = R_azi * R_ele  
-
-    # += Variables
-    print("\t" * depth + "+= Setup Variables")
-    v, q = ufl.TestFunctions(Mxs)
-    mx = Function(Mxs)
-    u, p = ufl.split(mx)
-    i, j, k, l, a, b = ufl.indices(6)  
     u_nu = Push * u
 
-    # += Kinematics
+    # ∆ Kinematics Setup
+    i, j, k, l, a, b = ufl.indices(6)  
     I = ufl.Identity(DIM)  
-    F = I + ufl.grad(u_nu)
+    F = ufl.variable(I + ufl.grad(u_nu))
 
-    # += [UNDERFORMED] Covariant basis vectors 
+    # ∆ Metric tensors
+    # µ [UNDERFORMED] Covariant basis vectors 
     A1 = ufl.as_vector([
         ufl.cos(azi) * ufl.cos(ele),
         ufl.sin(azi) * ufl.cos(ele),
@@ -148,16 +125,14 @@ def run_simulation(HLZ_CONS, r, pct, s, tnm, env):
     ])
     A2 = ufl.as_vector([0.0, 1.0, 0.0])  
     A3 = ufl.as_vector([0.0, 0.0, 1.0])
-
-    # += [UNDERFORMED] Metric tensors
+    # µ [UNDERFORMED] Metric tensors
     G_v = ufl.as_tensor([
         [ufl.dot(A1, A1), ufl.dot(A1, A2), ufl.dot(A1, A3)],
         [ufl.dot(A2, A1), ufl.dot(A2, A2), ufl.dot(A2, A3)],
         [ufl.dot(A3, A1), ufl.dot(A3, A2), ufl.dot(A3, A3)]
     ]) 
     G_v_inv = ufl.inv(G_v)  
-
-    # += [DEFORMED] Metric covariant tensors
+    # µ [DEFORMED] Metric covariant tensors
     g_v = ufl.as_tensor([
         [ufl.dot(F * A1, F * A1), ufl.dot(F * A1, F * A2), ufl.dot(F * A1, F * A3)],
         [ufl.dot(F * A2, F * A1), ufl.dot(F * A2, F * A2), ufl.dot(F * A2, F * A3)],
@@ -165,152 +140,148 @@ def run_simulation(HLZ_CONS, r, pct, s, tnm, env):
     ])
     g_v_inv = ufl.inv(g_v)
 
-    # += Christoffel symbols 
+    # ∆ Christoffel symbols 
     Gamma = ufl.as_tensor(
         0.5 * G_v_inv[k, l] * (ufl.grad(G_v[j, l])[i] + ufl.grad(G_v[i, l])[j] - ufl.grad(G_v[i, j])[l]),
         (i, j, k)
     )
 
-    # += Covariant derivative
+    # ∆ Covariant derivative
     covDev = ufl.as_tensor(ufl.grad(v)[i, j] + Gamma[i, k, j] * v[k], (i, j))
 
-    # += Kinematics 
+    # ∆ Kinematics Tensors
     C = ufl.variable(F.T * F)  
     B = ufl.variable(F * F.T)  
     E = ufl.as_tensor(0.5 * (g_v - G_v))   
-    J = ufl.det(F)        
+    J = ufl.det(F)   
 
-    # += Basis for Cauchy
-    # e1 = ufl.as_tensor([[1.0, 0.0, 0.0]]) 
+    # ∆ Constitutive setup
     e1 = ufl.as_tensor([[
         ufl.cos(azi) * ufl.cos(ele),
         ufl.sin(azi) * ufl.cos(ele),
         ufl.sin(ele)
-    ]]) 
+    ]])
     I4e1 = ufl.inner(e1 * C, e1)
     cond = lambda a: ufl.conditional(a > 1, a, 0)
 
+    # ∆ Sigma
     sig = (
         HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
         2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0])
     )
+
+    # ∆ Second Piola-Kirchoff with Pressure term
     s_piola = J * ufl.inv(F) * sig * ufl.inv(F.T) + J * ufl.inv(F) * p * ufl.inv(G_v) * ufl.inv(F.T)
 
-    # += Residual and Solver
+    # ∆ Residual
     print("\t" * depth + "+= Setup Solver and Residual")
     dx = ufl.Measure(integral_type="dx", domain=domain, metadata={"quadrature_degree": QUADRATURE})
     R = ufl.as_tensor(s_piola[a, b] * F[j, b] * covDev[j, a]) * dx + q * (J - 1) * dx
 
-    # log.set_log_level(log.LogLevel.INFO)7
+    # log.set_log_level(log.LogLevel.INFO)
 
-    tgs_x0 = ft.find(n_tg[2][np.where(np.array(l_tg[2]) == "Surface_x0")[0][0]])
-    tgs_x1 = ft.find(n_tg[2][np.where(np.array(l_tg[2]) == "Surface_x1")[0][0]])
+    # ∆ Setup boundary terms
+    print("\t" * depth + "+= Boundary Conditions")
+    tgs_x0 = ft.find(1110)
+    tgs_x1 = ft.find(1112)
     xx0 = locate_dofs_topological(Mxs.sub(0).sub(X), domain.topology.dim - 1, tgs_x0)
     xx1 = locate_dofs_topological(Mxs.sub(0).sub(X), domain.topology.dim - 1, tgs_x1)
     yx0 = locate_dofs_topological(Mxs.sub(0).sub(Y), domain.topology.dim - 1, tgs_x0)
     yx1 = locate_dofs_topological(Mxs.sub(0).sub(Y), domain.topology.dim - 1, tgs_x1)
     zx0 = locate_dofs_topological(Mxs.sub(0).sub(Z), domain.topology.dim - 1, tgs_x0)
     zx1 = locate_dofs_topological(Mxs.sub(0).sub(Z), domain.topology.dim - 1, tgs_x1)
-    sig = Function(Tes)
-    stress_values = []
-    stress_mean = []
-    # += Shape iteration
-    for k in [0, 5, 10, 15, 20]: #range(0, pct+1, 2):
 
+    # ∆ Iterate strain
+    sig_xx_mean = []
+    for k in [0, 5, 10, 15, 20]:
+
+        # ∆ Apply displacement
         du = CUBE["x"] * PXLS["x"] * (k / 100)
-        
         if s:
-            d_xx0 = dirichletbc(Constant(domain, default_scalar_type(du//2)), xx0, Mxs.sub(0).sub(X))
-            d_xx1 = dirichletbc(Constant(domain, default_scalar_type(-du//2)), xx1, Mxs.sub(0).sub(X))
-        else:
             d_xx0 = dirichletbc(Constant(domain, default_scalar_type(-du//2)), xx0, Mxs.sub(0).sub(X))
             d_xx1 = dirichletbc(Constant(domain, default_scalar_type(du//2)), xx1, Mxs.sub(0).sub(X))
+        else:
+            d_xx0 = dirichletbc(Constant(domain, default_scalar_type(du//2)), xx0, Mxs.sub(0).sub(X))
+            d_xx1 = dirichletbc(Constant(domain, default_scalar_type(-du//2)), xx1, Mxs.sub(0).sub(X))
         d_yx0 = dirichletbc(Constant(domain, default_scalar_type(0)), yx0, Mxs.sub(0).sub(Y))
         d_yx1 = dirichletbc(Constant(domain, default_scalar_type(0)), yx1, Mxs.sub(0).sub(Y))
         d_zx0 = dirichletbc(Constant(domain, default_scalar_type(0)), zx0, Mxs.sub(0).sub(Z))
         d_zx1 = dirichletbc(Constant(domain, default_scalar_type(0)), zx1, Mxs.sub(0).sub(Z))
         bc = [d_xx0, d_yx0, d_zx0, d_xx1, d_yx1, d_zx1]
 
-        # += Nonlinear Solver
+        # ∆ Solver
         print("\t" * depth + "+= Solve ...")
         problem = NonlinearProblem(R, mx, bc)
         solver = NewtonSolver(domain.comm, problem)
-        solver.atol = 1e-5
-        solver.rtol = 1e-5
+        solver.atol = TOL
+        solver.rtol = TOL
         solver.convergence_criterion = "incremental"
 
-
-        # +==+==+
-        # Solution and Output
-        # += Solve
-        try:
-            num_its, converged = solver.solve(mx)
-        except Exception as e:
-            print(f"Dolfinx error encountered during solve: {e}")
-            return None  # Return None to indicate failure
-
-        if not converged:
-            print(f"Solver did not converge for pct = {k}")
-            return None  # Return None to indicate failure
-
+        # ∆ Solve
+        num_its, _ = solver.solve(mx)
         print("\t" * depth + " ... converged in {} its".format(num_its))
-
-        # Extract the stress at the center of the domain.  We'll assume
-        # the center is at (0, 0, Z/2).  You may need to adjust this
-        # depending on your mesh.
-        # center = np.array([[CUBE["x"] / 2, CUBE["y"] / 2, CUBE["z"] / 2]])
+        
+        # ∆ Evaluation
         print("\t" * depth + "+= Evaluate Tensors")
         u_eval = mx.sub(0).collapse()
         p_eval = mx.sub(1).collapse()
+        # µ Evaluate stress
         cauchy = Expression(
-            e=cauchy_tensor(u_eval, HLZ_CONS, azi, ele, p_eval, depth), 
+            e=cauchy_tensor(u_eval, HLZ_CONS, p_eval, x, azi, ele, depth), 
             X=Tes.element.interpolation_points()
         )
         sig.interpolate(cauchy)
+       
+        # ∆ Format for saving
         n_comps = 9
         sig_arr = sig.x.array
         n_nodes = len(sig_arr) // n_comps
         r_sig = sig_arr.reshape((n_nodes, n_comps))
-        stress_values.append(np.max(r_sig[:, 0]))  # Get xx component
-        stress_mean.append(np.mean(r_sig[:, 0]))
 
-    print(sig_arr)
-    print(stress_mean)
-    print(HLZ_CONS)
+        # ∆ Store data
+        coords = np.array(x_n.function_space.tabulate_dof_coordinates()[:])
+        df = pd.DataFrame(
+            data={
+                "X": coords[:, 0], "Y": coords[:, 1], "Z": coords[:, 2],
+                "sig_xx": r_sig[:, 0], "sig_yy": r_sig[:, 4], "sig_zz": r_sig[:, 8],
+                "sig_xy": r_sig[:, 1], "sig_xz": r_sig[:, 2], "sig_yz": r_sig[:, 5]
+            }
+        )
 
-    # f = open("stress_vals_pos.txt", "a")
-    # for x in stress_values:
-    #     f.write(str(x))
-    # f.close()
+        # ∆ Retain mean value
+        sig_xx_mean.append(df.loc[:, 'sig_xx'].mean())
 
-    f = open(f"m_{r}_s_.txt", "a")
-    for x in stress_mean:
+    # ∆ Update text files on progress 
+    # µ Mean data
+    f = open(f"m_{r}_.txt", "a")
+    for x in sig_xx_mean:
         f.write(str(x)  +  "  ")
     f.close()
-
-    f = open(f"c_{r}_s_.txt", "a")
+    # µ Constitutive datas
+    f = open(f"c_{r}_.txt", "a")
     f.write(str(HLZ_CONS) + "  ")
     f.close()
-    return stress_mean
 
+    return sig_xx_mean
 
+# ∆ Error calculation
 def error_function(HLZ_CONS, strain_exp, stress_exp, r, pct, s, tnm, env):
-    stress_sim = run_simulation(HLZ_CONS, r, pct, s, tnm, env)
-    if stress_sim is None:
-        return 1e10  # Return a very large error value on solver failure
 
-    # Interpolate simulation stress to experimental strain points
-    strain_sim = np.linspace(0, pct / 100, len(stress_sim))
-    interp_stress_sim = np.interp(strain_exp, strain_sim, stress_sim)
+    sig_sim = run_simulation(HLZ_CONS, r, pct, s, tnm, env)
+    if sig_sim is None:
+        return 1e10
 
-    mse = np.mean((interp_stress_sim - stress_exp) ** 2)
+    eps_sim = np.linspace(0, pct / 100, len(sig_sim))
+    interp = np.interp(strain_exp, eps_sim, sig_sim)
+
+    mse = np.mean((interp - stress_exp) ** 2)
     return mse
 
+# ∆ Simulation environment
 def setup_simulation_environment(file, order=2, quadrature=4):
 
-    DIM = 3
+    # ∆ Domain
     domain, ct, ft = io.gmshio.read_from_msh(filename=file, comm=MPI.COMM_WORLD, rank=0, gdim=DIM)
-
     P2 = element("Lagrange", domain.basix_cell(), order, shape=(domain.geometry.dim,))
     P1 = element("Lagrange", domain.basix_cell(), order - 1)
     Mxs = functionspace(domain, mixed_element([P2, P1]))
@@ -321,54 +292,77 @@ def setup_simulation_environment(file, order=2, quadrature=4):
         "ct": ct,
         "ft": ft,
         "Mxs": Mxs,
-        "Tes": Tes,
-        "order": order,
-        "quadrature": quadrature
+        "Tes": Tes
     }
 
+def my_callback(xk, convergence):
+    print(f"Current best parameters: {xk}")
+    print(f"Convergence: {convergence}")
+    return False  # Return True to stop the optimization early
 
+
+# ∆ Initiate
 if __name__ == '__main__':
-    # Example usage:
+    
+    # ∆ Test setup
     tnm = "test"  # Or your test name
     r = 1000
     file = os.path.dirname(os.path.abspath(__file__)) + f"/_msh/EMGEO_{r}.msh"  # Replace with your mesh file
-      # Or your r value
-    pct = 20  # Max strain percentage
-    s = 0 #Or True
-    # Load your experimental data.  Make sure strain_exp is between 0 and 0.2
-    strain_exp = np.array([0.0, 0.05, 0.10, 0.15, 0.20])  # Example experimental strain points
-    stress_exp = np.array([0, 0.3857, 1.1048, 1.8023, 2.6942])  # Example experimental stress points
+    pct = 20 
+    s = 1
+
+    # ∆ Experimental data to converge to
+    eps_exp = np.array([0.0, 0.05, 0.10, 0.15, 0.20])
+    sig_exp = np.array([0, 0.3857, 1.1048, 1.8023, 2.6942])
     bounds = [(0.001, 50), (0.001, 50), (0.001, 50), (0.001, 50)]
-    initial_parameters = [0.059, 8.023, 18.472, 16.026] 
-    # initial_parameters = [0.87475258, 8.023, 18.472, 16.026] 
+    init_hlz = [0.059, 8.023, 18.472, 16.026] 
+
+    # ∆ Setup
     env = setup_simulation_environment(file=file)
-    result = opt.minimize(error_function, 
-        initial_parameters,
-        args=(strain_exp, stress_exp, r, pct, s, tnm, env), 
-        method='Nelder-Mead',
-        bounds=bounds
+    n_cpu = multiprocessing.cpu_count()
+    result = differential_evolution(
+        error_function,
+        bounds=bounds,
+        args=(eps_exp, sig_exp, r, pct, s, tnm, env),
+        strategy='best1bin',
+        maxiter=50,
+        popsize=15,
+        tol=1e-6,
+        mutation=(0.5, 1),
+        recombination=0.7,
+        seed=42,
+        workers=-1, 
+        updating='deferred',
+        polish=True,
+        callback=my_callback
     )
 
-    optimized_parameters = result.x
-    print("Optimized HLZ_CONS:", optimized_parameters)
-    print("Minimum Error:", result.fun)
+    # Save final result
+    np.savetxt("best_parameters.txt", result.x)
+    print("Optimization complete. Best parameters:")
+    print(result.x)
 
-    # Run the simulation with the optimized parameters and plot the results
-    optimized_stress = run_simulation(optimized_parameters, r, pct, s, file, tnm)
-    if optimized_stress is not None:
-        strain_sim = np.linspace(0, pct / 100, len(optimized_stress))
-        import matplotlib.pyplot as plt
-        plt.plot(strain_exp, stress_exp, 'o', label='Experimental Data')
-        plt.plot(strain_sim, optimized_stress, '-', label='Optimized Simulation')
-        plt.xlabel('Strain')
-        plt.ylabel('Stress')
-        plt.legend()
-        plt.savefig(os.path.dirname(os.path.abspath(__file__)) + "/_png/" + f"{r}_mean_opti.png")
-        plt.close()
-    else:
-        print("Simulation failed with optimized parameters.")
+    # # ∆ Optimise
+    # opti_param = result.x
+    # print(f" += Optimized HLZ_CONS: {opti_param}")
+    # print(f" += Minimum Error: {result.fun}")
+
+    # # ∆ Run
+    # opti_sig = run_simulation(opti_param, r, pct, s, file, tnm)
+    # if opti_sig is not None:
+    #     # ∆ Plot data values
+    #     strain_sim = np.linspace(0, pct / 100, len(opti_sig))
+    #     plt.plot(eps_exp, sig_exp, 'o', label='Experimental Data')
+    #     plt.plot(strain_sim, opti_sig, '-', label='Optimized Simulation')
+    #     plt.xlabel('Strain')
+    #     plt.ylabel('Stress')
+    #     plt.legend()
+    #     plt.savefig(os.path.dirname(os.path.abspath(__file__)) + "/_png/" + f"{r}_mean_opti.png")
+    #     plt.close()
+    # else:
+    #     print("Simulation failed with optimized parameters.")
         
-    print(optimized_parameters)
+    # print(opti_param)
 
     
 

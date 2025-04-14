@@ -1,7 +1,8 @@
 TO:
 scp /Users/murrayla/Documents/main_PhD/FEniCSx/FEniCSx/P_Passive_Contraction/fe.py murrayla@spartan.hpc.unimelb.edu.au:/data/gpfs/projects/punim1102/liam/P_Pub1
 
-scp /Users/murrayla/Documents/main_PhD/FEniCSx/FEniCSx/P_Passive_Contraction/hpc_fxBig.py murrayla@spartan.hpc.unimelb.edu.au:/data/gpfs/projects/punim1102/liam/P_Pub1
+scp /Users/murrayla/Documents/main_PhD/FEniCSx/FEniCSx/P_Passive_Contraction/archive/hpc_fxBig.py murrayla@spartan.hpc.unimelb.edu.au:/data/gpfs/projects/punim1102/liam/P_Pub1
+
 
 scp /Users/murrayla/Documents/main_PhD/BIG_SEG/filtered.npy murrayla@spartan.hpc.unimelb.edu.au:/data/gpfs/projects/punim1102/liam/P_Pub1
 
@@ -17,7 +18,7 @@ scp murrayla@spartan.hpc.unimelb.edu.au:/data/gpfs/projects/punim1102/liam/P_Pub
 
 FROM: (whole group)
 scp -r murrayla@spartan.hpc.unimelb.edu.au:/data/gpfs/projects/punim1102/liam/P_Pub1/_bp/_SPH/_test_1000_20.bp /Users/murrayla/Documents/main_PhD/FEniCSx/FEniCSx/P_Passive_Contraction/_bp/
-
+scp -r murrayla@spartan.hpc.unimelb.edu.au:/data/gpfs/projects/punim1102/liam/P_Pub1/_png/ /Users/murrayla/Documents/main_PhD/FEniCSx/FEniCSx/P_Passive_Contraction/_png/
 
 
 
