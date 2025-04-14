@@ -7,342 +7,153 @@
        consolidation script to run all components of fe simulation
 """
 
+# ∆ Raw
 import os
-import argparse
+import random
+import numpy as np
+import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-# +==+==+==+
-# Setup
-# += Imports
+# ∆ Dolfin
+import ufl
+from mpi4py import MPI
+from basix.ufl import element, mixed_element
 from dolfinx import log, io,  default_scalar_type
 from dolfinx.fem import Function, functionspace, dirichletbc, locate_dofs_topological, locate_dofs_geometrical, Expression, element, Constant
 from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
-from basix.ufl import element, mixed_element
-from mpi4py import MPI
-import pandas as pd
-import numpy as np
-import argparse
-# import basix
-import ufl
-import os
-# += Parameters
+
+# ∆ Seed
+random.seed(17081993)
+
+# ∆ Global Constants
 DIM = 3
-INC = 10
-I_0 = 0
-F_0 = 0.0
-TOL = 1e-5
-ZDISC = 5 
-ZLINE = 14
 ORDER = 2 
+TOL = 1e-5
 QUADRATURE = 4
 X, Y, Z = 0, 1, 2
-CONSTIT_MYO = [1, 1, 1, 1]
-MNR_CONS = [1, 1]
-HLZ_CONS = [x for x in [0.059, 8.023, 18.472, 16.026, 2.481, 11.120, 0.216, 11.436]]
-# HLZ_CONS = [0.76791557, 9, 1, 14.00380828]
-# HLZ_CONS = [0.61550274, 10.51527666,  6.30940279, 26.05661116]
-# HLZ_CONS = [5.7, 11.67, 19.83, 24.72]
 PXLS = {"x": 11, "y": 11, "z": 50}
 CUBE = {"x": 1000, "y": 1000, "z": 100}
 EDGE = [PXLS[d]*CUBE[d] for d in ["x", "y", "z"]]
 
-def stretch(test, r, depth):
-    # += Set theme
-    sns.set_style("whitegrid")
+# ∆ Material Properties
+# HLZ_CONS = [x for x in [0.059, 8.023, 18.472, 16.026, 2.481, 11.120, 0.216, 11.436]] # raw
+# HLZ_CONS = [5.02557295e-01, 1.04201471e+01, 1.00000000e-03, 4.26048750e+01] # 1
+# HLZ_CONS = [0.10100884, 13.47767073, 1.92510268, 10.57663791] # 2
+HLZ_CONS = [0.62213483, 10.45545208, 0.40308552, 50] # 3
+# HLZ_CONS = [0.12767144, 18.80398525, 0.09138111, 8.61983857] # 4
 
-    # += Isolate data files
+# ∆ Stretch Plotting
+def stretch(test, r, depth):
+    depth += 1
+    sns.set_style("whitegrid")
+    print("\t" * depth + "+= Plot Stretch response")
+
+    # ∆ Load
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_csv/")
     files = [file for file in os.listdir(path) if (((str(test) + "_" + str(int(r)) + "_") in file)) and ("stretch" in file)]
+    pnt_sig = dict() 
 
-    # += Store data
-    data_l = []
-
-    # += Iterate files
+    # ∆ Iterate files
     for file in files:
-        file_df = pd.read_csv(path + file)
-        
-        # += Filter
-        # f_df = file_df[(
-        #     (file_df["X"] >= 50) & (file_df["X"] <= EDGE[0] - 50) & 
-        #     (file_df["Y"] >= 50) & (file_df["Y"] <= EDGE[1] - 50) & 
-        #     (file_df["Z"] >= 50) & (file_df["Z"] <= EDGE[2] - 50) 
-        # )].copy()
-        f_df = file_df.copy()
-        
-        # += Sample points
-        s_df = f_df.sample(n=len(f_df), random_state=42)
+
+        # ∆ Strain value
         eps = int(file.split("_")[-2])
+
+        # ∆ Select data
+        file_df = pd.read_csv(path + file)
+        f_df = file_df[
+            (file_df["X"] >= 50) & (file_df["X"] <= EDGE[0] - 50) & 
+            (file_df["Y"] >= 50) & (file_df["Y"] <= EDGE[1] - 50) & 
+            (file_df["Z"] >= 50) & (file_df["Z"] <= EDGE[2] - 50)
+        ].copy()
         
-        # += Append data
-        for _, row in s_df.iterrows():
-            data_l.append([eps, "σ_xx", row["sig_xx"]])
+        # ∆ Isolate
+        for _, row in f_df.iterrows():
+            pnt_id = (round(row["X"]), round(row["Y"]), round(row["Z"]))
+            if pnt_id not in pnt_sig:
+                pnt_sig[pnt_id] = []
+            pnt_sig[pnt_id].append((eps, row["sig_xx"]))
 
-    # += Create dataframe
-    df = pd.DataFrame(data_l, columns=["Strain", "Stress Type", "Stress"])
+    # ∆ Sample
+    a_keys = list(pnt_sig.keys())
+    samp = random.sample(a_keys, min(50, len(a_keys)))
 
-    # += Compute Stats
-    sum_df = df.groupby(["Strain", "Stress Type"]).agg(
-        mean_stress=("Stress", "mean"),
-        std_stress=("Stress", "std")
-    ).reset_index()
-
-    # += Extract SIG_XX subset
-    sig_xx_df = sum_df[sum_df["Stress Type"] == "σ_xx"]
-
-    # += Experimental Data (from Table S10A)
-    exp_strain = [0, 5, 10, 15, 20]
-    exp_stress = [0, 0.3857, 1.1048, 1.8023, 2.6942] 
-    exp_sem = [0, 0.0715, 0.2257, 0.3251, 0.3999]    
-
-    # += Plot
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.set_title("Normal Stress in X Direction [σ] - Stretch")
+    # ∆ Plot setup
+    _, ax = plt.subplots(figsize=(6, 4))
+    ax.set_title("Major Axis Normal Stress [σ_ff] - Stretch")
     ax.set_xlabel("Strain, ΔL/L [%]")
-    ax.set_ylabel("Cauchy Stress [kPa]")
+    ax.set_ylabel("Stress [mN/mm^2]")
 
-    # += Plot simulated data
-    ax.plot(sig_xx_df["Strain"], sig_xx_df["mean_stress"], marker="o", label="Simulation", color="tab:blue")
-    ax.fill_between(
-        sig_xx_df["Strain"],
-        sig_xx_df["mean_stress"] - sig_xx_df["std_stress"],
-        sig_xx_df["mean_stress"] + sig_xx_df["std_stress"],
-        alpha=0.3,
-        color="tab:blue"
-    )
+    # ∆ Sample
+    for key in samp:
+        point_series = sorted(pnt_sig[key], key=lambda x: x[0])
+        strains = [s[0] for s in point_series]
+        stresses = [s[1] for s in point_series]
+        ax.plot(strains, stresses, alpha=0.6, linewidth=1)
 
-    # += Plot experimental data
-    ax.errorbar(exp_strain, exp_stress, yerr=exp_sem, fmt="--o", label="Li et al. (2023)", color="tab:red")
+    # ∆ Plot experimental values
+    # µ Li
+    exp_eps = [0, 5, 10, 15, 20]
+    exp_sig = [0, 0.3857, 1.1048, 1.8023, 2.6942] 
+    exp_sem = [0, 0.0715, 0.2257, 0.3251, 0.3999]    
+    ax.errorbar(exp_eps, exp_sig, yerr=exp_sem, fmt="--o", label="Li et al. (2023)", color="tab:red")
+    # µ Caporizzo
+    exp_eps = [0, 2.5, 5, 7.5, 10, 11]
+    exp_sig = [0, 0.24, 0.375, 0.625, 1.1, 1.27] 
+    ax.plot(exp_eps, exp_sig, "--g", marker="o", label="Caporizzo et al. (2018)")
 
-    exp_strain = [0, 2.5, 5, 7.5, 10, 11]
-    exp_stress = [0, 0.24, 0.375, 0.625, 1.1, 1.27] 
-    ax.plot(exp_strain, exp_stress, "--g", marker="o", label="Caporizzo et al. (2018)")
-
-    # exp_strain = [0, (2-1.6)//1.6 * 100, (2.1-1.6)//1.6 * 100, (2.2-1.6)//1.6 * 100, (2.3-1.6)//1.6 * 100] 
-    # exp_stress = [0, 1.25//2, 1.4//2, 1.25, 1.5] 
-    # ax.plot(exp_strain, exp_stress, "--o", marker="o", label="Fish et al. (1984) [Cardiac]")
-
-    # exp_strain = [0, (2-1.9)//1.6 * 100, (2.1-1.6)//1.6 * 100, (2.2-1.6)//1.6 * 100, (2.3-1.6)//1.6 * 100] 
-    # exp_stress = [0, 1.25//2, 1.4//2, 1.25, 1.5] 
-    # ax.plot(exp_strain, exp_stress, "--o", marker="o", label="Fish et al. (1984) [Skeletal]")
-
+    # ∆ Save
     ax.legend()
     plt.tight_layout()
-    plt.savefig(os.path.dirname(os.path.abspath(__file__)) + "/_png/" + str(test) + "_" + str(int(r)) + "_sig_xx.png")
+    plt.savefig(os.path.dirname(os.path.abspath(__file__)) + f"/_png/{test}_{int(r)}_EXPXX.png")
     plt.close()
 
-    # # += Store data array
-    # data_array = {
-    #     "simulated": list(zip(sig_xx_df["Strain"], sig_xx_df["mean_stress"], sig_xx_df["std_stress"])),
-    #     "experimental": list(zip(exp_strain, exp_stress, exp_sem))
-    # }
-
-def compression(test, r, depth):
-    # += Set theme
-    sns.set_style("whitegrid")
-
-    # += Isolate data files
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_csv/")
-    files = [file for file in os.listdir(path) if (((str(test) + "_" + str(int(r)) + "_") in file) and ("stretch" not in file))]
-
-    # += Store data
-    data_l = []
-
-    # += Iterate files
-    for file in files:
-        file_df = pd.read_csv(path + file)
-        
-        # += Filter
-        # f_df = file_df[(
-        #     (file_df["X"] >= 50) & (file_df["X"] <= EDGE[0] - 50) & 
-        #     (file_df["Y"] >= 50) & (file_df["Y"] <= EDGE[1] - 50) & 
-        #     (file_df["Z"] >= 50) & (file_df["Z"] <= EDGE[2] - 50) 
-        # )].copy()
-        f_df = file_df.copy()
-        
-        # += Sample points
-        s_df = f_df.sample(n=len(f_df), random_state=42)
-        eps = int(file.split("_")[-2])
-        
-        # += Append data
-        for _, row in s_df.iterrows():
-            data_l.append([eps, "σ_xx", row["sig_xx"]])
-
-    # += Create dataframe
-    df = pd.DataFrame(data_l, columns=["Strain", "Stress Type", "Stress"])
-
-    # += Compute Stats
-    sum_df = df.groupby(["Strain", "Stress Type"]).agg(
-        mean_stress=("Stress", "max"),
-        std_stress=("Stress", "std")
-    ).reset_index()
-
-    # += Extract SIG_XX subset
-    sig_xx_df = sum_df[sum_df["Stress Type"] == "σ_xx"]
-
-    # += Experimental Data (from Table S10A)
-    exp_strain = [0, 5, 10, 15, 20]
-    exp_stress = [0, 0.3857, 1.1048, 1.8023, 2.6942] 
-    exp_sem = [0, 0.0715, 0.2257, 0.3251, 0.3999]    
-
-    # += Plot
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.set_title("Normal Stress in X Direction [σ] - Compression")
-    ax.set_xlabel("Strain, ΔL/L [%]")
-    ax.set_ylabel("Cauchy Stress [kPa]")
-
-    # += Plot simulated data
-    ax.plot(sig_xx_df["Strain"], sig_xx_df["mean_stress"], marker="o", label="Simulation", color="tab:blue")
-    ax.fill_between(
-        sig_xx_df["Strain"],
-        sig_xx_df["mean_stress"] - sig_xx_df["std_stress"],
-        sig_xx_df["mean_stress"] + sig_xx_df["std_stress"],
-        alpha=0.3,
-        color="tab:blue"
-    )
-
-    # += Plot experimental data
-    ax.errorbar(exp_strain, exp_stress, yerr=exp_sem, fmt="--o", label="Li et al. (2023)", color="tab:red")
-
-    exp_strain = [0, 2.5, 5, 7.5, 10, 11]
-    exp_stress = [0, 0.24, 0.375, 0.625, 1.1, 1.27] 
-    ax.plot(exp_strain, exp_stress, "--g", marker="o", label="Caporizzo et al. (2018)")
-
-    # exp_strain = [0, (2-1.6)//1.6 * 100, (2.1-1.6)//1.6 * 100, (2.2-1.6)//1.6 * 100, (2.3-1.6)//1.6 * 100] 
-    # exp_stress = [0, 1.25//2, 1.4//2, 1.25, 1.5] 
-    # ax.plot(exp_strain, exp_stress, "--o", marker="o", label="Fish et al. (1984) [Cardiac]")
-
-    # exp_strain = [0, (2-1.9)//1.6 * 100, (2.1-1.6)//1.6 * 100, (2.2-1.6)//1.6 * 100, (2.3-1.6)//1.6 * 100] 
-    # exp_stress = [0, 1.25//2, 1.4//2, 1.25, 1.5] 
-    # ax.plot(exp_strain, exp_stress, "--o", marker="o", label="Fish et al. (1984) [Skeletal]")
-
-    ax.legend()
-    plt.tight_layout()
-    plt.savefig(os.path.dirname(os.path.abspath(__file__)) + "/_png/" + str(test) + "_" + str(int(r)) + "_sig_xx.png")
-    plt.close()
-
-    # # += Store data array
-    # data_array = {
-    #     "simulated": list(zip(sig_xx_df["Strain"], sig_xx_df["mean_stress"], sig_xx_df["std_stress"])),
-    #     "experimental": list(zip(exp_strain, exp_stress, exp_sem))
-    # }
-
+# ∆ Plot stress strain curves
 def plot_(n, r, s, depth):
     depth += 1
     # += Stress Strain
     print("\t" * depth + "+= Plot Stress-Strain")
-    if s:
-        stretch(n, r, depth)
-    else:
-        compression(n, r, depth)
+    stretch(n, r, depth)
 
-# += Calculate Cauchy Stress
+# ∆ Cauchy
 def cauchy_tensor(u, p, x, azi, ele, depth):
     depth += 1
     print("\t" * depth + "~> Calculate the values of cauchy stress tensor")
-
-    R_azi = ufl.as_matrix([
-        [ufl.cos(azi), -ufl.sin(azi), 0],
-        [ufl.sin(azi),  ufl.cos(azi), 0],
-        [0,             0,            1]
-    ])
-    R_ele = ufl.as_matrix([
-        [1, 0,             0],
-        [0, ufl.cos(ele), -ufl.sin(ele)],
-        [0, ufl.sin(ele),  ufl.cos(ele)]
-    ])
-    Push = R_azi * R_ele  
-    u_nu = Push * u
-
-    I = ufl.Identity(DIM)  
-    F = I + ufl.grad(u_nu) 
-
-    # += [UNDERFORMED] Covariant basis vectors 
-    A1 = ufl.as_vector([
-        ufl.cos(azi) * ufl.cos(ele),
-        ufl.sin(azi) * ufl.cos(ele),
-        ufl.sin(ele)
-    ])
-    A2 = ufl.as_vector([0.0, 1.0, 0.0])  
-    A3 = ufl.as_vector([0.0, 0.0, 1.0])
-
-    # += [UNDERFORMED] Metric tensors
-    G_v = ufl.as_tensor([
-        [ufl.dot(A1, A1), ufl.dot(A1, A2), ufl.dot(A1, A3)],
-        [ufl.dot(A2, A1), ufl.dot(A2, A2), ufl.dot(A2, A3)],
-        [ufl.dot(A3, A1), ufl.dot(A3, A2), ufl.dot(A3, A3)]
-    ]) 
-
-    # += [DEFORMED] Metric covariant tensors
-    g_v = ufl.as_tensor([
-        [ufl.dot(F * A1, F * A1), ufl.dot(F * A1, F * A2), ufl.dot(F * A1, F * A3)],
-        [ufl.dot(F * A2, F * A1), ufl.dot(F * A2, F * A2), ufl.dot(F * A2, F * A3)],
-        [ufl.dot(F * A3, F * A1), ufl.dot(F * A3, F * A2), ufl.dot(F * A3, F * A3)]
-    ])
-
     
-    C = ufl.variable(F.T * F) 
-    # E = ufl.as_tensor(0.5 * (g_v - G_v))  
+    # ∆ Kinematics
+    I = ufl.Identity(DIM)  
+    F = I + ufl.grad(u)  
+    C = ufl.variable(F.T * F)  
     B = ufl.variable(F * F.T) 
-    J = ufl.det(F)
 
-    # e1 = ufl.as_tensor([[1.0, 0.0, 0.0]]) 
-    e1 = e1 = ufl.as_tensor([[
-        ufl.cos(azi) * ufl.cos(ele),
-        ufl.sin(azi) * ufl.cos(ele),
-        ufl.sin(ele)
-    ]])
-    I4e1 = ufl.inner(e1 * C, e1)
-
+    # ∆ Constitutive 
+    ff = ufl.as_tensor([[1.0, 0.0, 0.0]]) 
+    I4e1 = ufl.inner(ff * C, ff)
     reg = 1e-6 
     cond = lambda a: ufl.conditional(a > reg + 1, a, 0)
-    # sig = (
-    #     HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
-    #     2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0])
-    # )
 
-    # Psi = (
-    #     HLZ_CONS[0]/(2*HLZ_CONS[1]) * (ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) - 1) + 
-    #     HLZ_CONS[2]/(2*HLZ_CONS[3]) * (ufl.exp(HLZ_CONS[3] * (cond(I4e1 - 1) ** 2)) - 1)
-    # )
-    Psi = (
-        HLZ_CONS[0]/(2*HLZ_CONS[1]) * (ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) - 1) + 
-        HLZ_CONS[2]/(2*HLZ_CONS[3]) * (ufl.exp(HLZ_CONS[3] * (cond(I4e1 - 1) ** 2)) - 1)
+    # ∆ Cauchy
+    sig = (
+        HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
+        2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(ff[0], ff[0])
     )
-    piola = J * ufl.diff(Psi, F) * ufl.inv(F.T) + J * p * ufl.inv(G_v) * ufl.inv(F.T)
-
-    # sig = (
-    #     HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
-    #     2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0])
-    # ) - p * ufl.inv(G_v)
-
-    sig = (1 / J) * piola * F.T
-
-    # Q = (
-    #     CONSTIT_MYO[1] * E[0,0]**2 + 
-    #     CONSTIT_MYO[2] * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
-    #     CONSTIT_MYO[3] * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
-    # )
-    # s_piola = CONSTIT_MYO[0]/4 * ufl.exp(Q) * ufl.as_matrix([
-    #     [4*CONSTIT_MYO[1]*E[0,0], 2*CONSTIT_MYO[3]*(E[1,0] + E[0,1]), 2*CONSTIT_MYO[3]*(E[2,0] + E[0,2])],
-    #     [2*CONSTIT_MYO[3]*(E[0,1] + E[1,0]), 4*CONSTIT_MYO[2]*E[1,1], 2*CONSTIT_MYO[2]*(E[2,1] + E[1,2])],
-    #     [2*CONSTIT_MYO[3]*(E[0,2] + E[2,0]), 2*CONSTIT_MYO[2]*(E[1,2] + E[2,1]), 4*CONSTIT_MYO[3]*E[2,2]],
-    # ]) - p * ufl.inv(G_v)
-
-    # sig = 1/J * F * s_piola * F.T
 
     return sig
     
-# += Calculate Strain
+# ∆ Strain
 def green_tensor(u, depth):
     depth += 1
     print("\t" * depth + "~> Calculate the values of green strain tensor")
 
+    # ∆ Kinematics
     I = ufl.variable(ufl.Identity(DIM))
     F = ufl.variable(I + ufl.grad(u))
     C = ufl.variable(F.T * F)
     E = ufl.variable(0.5*(C-I))
+
+    # ∆ Large strain
     eps = ufl.as_tensor([
         [E[0, 0], E[0, 1], E[0, 2]], 
         [E[1, 0], E[1, 1], E[1, 2]], 
@@ -351,84 +162,74 @@ def green_tensor(u, depth):
 
     return eps
 
-# += Smooth Data
-def gauss_smooth(coords, angles, depth):
+# ∆ Gaussian smoothing
+def gauss_smooth(coords, angles, zs, depth):
     depth += 1
     print("\t" * depth + "~> Apply Gaussian smoothing with anisotropy")
 
+    # ∆ Standard deviations to smooth over
     s_data = np.zeros_like(angles)
-    sigma_x = 2000 / 2.0  
-    sigma_y = 500 / 2.0  
-    sigma_z = 500 / 2.0
+    sd_x, sd_y, sd_z = 1000, 200, 200
 
+    # ∆ Smooth 
     for i in range(len(coords)):
-        dist_x = coords[:, 0] - coords[i, 0]
-        dist_y = coords[:, 1] - coords[i, 1]
-        dist_z = coords[:, 2] - coords[i, 2]
-        weights = np.exp(-0.5 * ((dist_x / sigma_x) ** 2 +
-                                 (dist_y / sigma_y) ** 2 +
-                                 (dist_z / sigma_z) ** 2))
+        dist_x = coords[zs, 0] - coords[i, 0]
+        dist_y = coords[zs, 1] - coords[i, 1]
+        dist_z = coords[zs, 2] - coords[i, 2]
+        weights = np.exp(-0.5 * ((dist_x / sd_x) ** 2 +
+                                 (dist_y / sd_y) ** 2 +
+                                 (dist_z / sd_z) ** 2))
         weights /= weights.sum()
         s_data[i] = np.sum(weights * angles)
 
     return s_data
 
-# += Apply fibre orientation values
-def anistropic(tnm, msh_ref, azi_vals, ele_vals, x_n, depth):
+# ∆ Assign anisotropy
+def anistropic(tnm, msh_ref, azi_vals, ele_vals, x_n, zs_nodes, depth):
     depth += 1
     print("\t" * depth + "~> Load and apply anistropic fibre orientations")
 
+    # ∆ Load angle data and mesh
     nmb = tnm.split("_")[0]
     ang_df = pd.read_csv(os.path.dirname(os.path.abspath(__file__)) + "_csv/vals_{}_{}.csv".format("EMGEO_" + str(msh_ref), nmb))
     n_list = []
     f = os.path.dirname(os.path.abspath(__file__)) + "_msh/" + "EMGEO_" + str(msh_ref) + "_mesh.nodes"
 
+    # ∆ Load coordinate data
     for line in open(f, 'r'):
         n_list.append(line.strip().replace('\t', ' ').split(' '))
     node = np.array(n_list[1:]).astype(np.float64)
     cart = node[:, 1:]
 
+    # ∆ Load angles
     coords = np.array(x_n.function_space.tabulate_dof_coordinates()[:])
     a = ang_df["a"].to_numpy()
     e = ang_df["e"].to_numpy()
 
+    # ∆ Assign angles to nodes
+    zs = []
     for i in range(len(coords)):
         pos = coords[i]
         dis = np.linalg.norm(pos - cart, axis=1)
         idx = np.argmin(dis)
-        azi_vals[i] = a[idx]
-        ele_vals[i] = e[idx]
+        if min(dis) < 500:
+            azi_vals[i] = a[idx]
+            ele_vals[i] = e[idx]
+            zs_nodes[i] = 1
+            zs.append(i)
 
-    azi_vals = gauss_smooth(coords, azi_vals, depth)
-    ele_vals = gauss_smooth(coords, ele_vals, depth)
+    # ∆ Smoothing
+    azi_vals = gauss_smooth(coords, azi_vals, zs, depth)
+    ele_vals = gauss_smooth(coords, ele_vals, zs, depth)
 
-    return azi_vals, ele_vals
+    return azi_vals, ele_vals, zs_nodes
 
-# +==+==+==+
-# fx_
-#   Inputs: 
-#       tnm  | str | test name
-#       file | str | file name
-#       tg_c | dict | cytosol physical element data
-#       tg_S | dict | sarcomere physical element data
-#   Outputs:
-#       .bp folder of deformation
+# ∆ Simulation
 def fx_(tnm, file, r, pct, s, depth):
     depth += 1
-    l_tg = {
-        0: ['Point_x0y0z1', 'Point_x0y0z0', 'Point_x0y1z1', 'Point_x0y1z0', 'Point_x1y0z1', 'Point_x1y0z0', 'Point_x1y1z1', 'Point_x1y1z0'], 
-        1: ['Line_x0y0z', 'Line_x0yz1', 'Line_x0y1z', 'Line_x0yz0', 'Line_x1y0z', 'Line_x1yz1', 'Line_x1y1z', 'Line_x1yz0', 'Line_xy0z0', 'Line_xy0z1', 'Line_xy1z0', 'Line_xy1z1'], 
-        2: ['Surface_x0', 'Surface_x1', 'Surface_y0', 'Surface_y1', 'Surface_z0', 'Surface_z1'], 
-        3: ['Volume']}
-    n_tg = {
-        0: [5000, 5001, 5002, 5003, 5004, 5005, 5006, 5007, 5008], 
-        1: [500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 512], 
-        2: [1110, 1112, 1101, 1121, 1011, 1211], 
-        3: [5, 6]
-    }
     print("\t" * depth + "+= Begin FE")
 
-    # += Domain Setup
+    # ∆ Domain
     print("\t" * depth + "+= Load Mesh and Setup Vector Spaces")
     domain, ct, ft = io.gmshio.read_from_msh(filename=file, comm=MPI.COMM_WORLD, rank=0, gdim=DIM)
     P2 = element("Lagrange", domain.basix_cell(), ORDER, shape=(domain.geometry.dim,))
@@ -436,7 +237,7 @@ def fx_(tnm, file, r, pct, s, depth):
     Mxs = functionspace(domain, mixed_element([P2, P1]))
     Tes = functionspace(mesh=domain, element=("Lagrange", ORDER, (DIM, DIM)))
 
-    # += Extract subdomains for dofs
+    # ∆ Subdomains
     print("\t" * depth + "+= Extract Subdomains")
     V, _ = Mxs.sub(0).collapse()
     V0 = Mxs.sub(0)
@@ -444,57 +245,73 @@ def fx_(tnm, file, r, pct, s, depth):
     V0y, _ = V0.sub(Y).collapse()
     V0z, _ = V0.sub(Z).collapse()
     
-    # += Anistropic setup
+    # ∆ Fibre field
     print("\t" * depth + "+= Setup Anistropy")
     x = ufl.SpatialCoordinate(domain)
-    x_n = Function(V)
-    ori = Function(V)
+    x_n, ori = Function(V), Function(V)
+    zsn = Function(V0x)
     azi, ele, ang = Function(V0x), Function(V0y), Function(V0z)
-    azi_vals = np.full_like(azi.x.array[:], F_0, dtype=default_scalar_type)
-    ele_vals = np.full_like(ele.x.array[:], F_0, dtype=default_scalar_type)
-    ang_vals = np.full_like(ele.x.array[:], F_0, dtype=default_scalar_type)
+    azi_vals = np.full_like(azi.x.array[:], 0, dtype=default_scalar_type)
+    ele_vals = np.full_like(ele.x.array[:], 0, dtype=default_scalar_type)
+    ang_vals = np.full_like(ang.x.array[:], 0, dtype=default_scalar_type)
+    zs_nodes = np.full_like(zsn.x.array[:], 0, dtype=default_scalar_type)
     if tnm == "test":
         azi.x.array[:] = azi_vals
         ele.x.array[:] = ele_vals
     else:
-        azi.x.array[:], ele.x.array[:] = anistropic(tnm, r, azi_vals, ele_vals, x_n, depth)
+        azi.x.array[:], ele.x.array[:], zsn.x.array[:] = anistropic(tnm, r, azi_vals, ele_vals, x_n, zs_nodes, depth)
 
-    # += Compute unit vector from azi/ele
+    # ∆ Create angular orientation vector
     ori_arr = ori.x.array.reshape(-1, 3)
     ori_arr[:, 0] = np.cos(ele.x.array) * np.cos(azi.x.array) 
     ori_arr[:, 1] = np.cos(ele.x.array) * np.sin(azi.x.array) 
     ori_arr[:, 2] = np.sin(ele.x.array) 
     ori.x.array[:] = ori_arr.reshape(-1)
     v_x = np.array([1.0, 0.0, 0.0])
-    ang_vals = np.arccos(np.clip(np.dot(ori_arr, v_x), -1.0, 1.0))
+    ang_vals = np.rad2deg(np.arccos(np.clip(np.dot(ori_arr, v_x), -1.0, 1.0)))
     ang.x.array[:] = ang_vals.reshape(-1)
 
-    # += Create Push matrix
-    R_azi = ufl.as_matrix([
+    # ∆ Save characteristics files
+    print("\t" * depth + "+= Store geometry files")
+    zsn.name = "Z-Disc Node Locations"
+    ori.name = "Orientation Vectors"
+    ang.name = "Angular Orientation [DEG]"
+    file = os.path.dirname(os.path.abspath(__file__)) + "/_bp/"
+    zsn_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_ZSN/" + tnm + "_" + str(r) + ".bp", zsn, engine="BP4")
+    ori_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_ANG/" + tnm + "_" + str(r) + ".bp", ori, engine="BP4")
+    sph_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_SPH/" + tnm + "_" + str(r) + ".bp", ang, engine="BP4")
+    zsn_file.write(0)
+    ori_file.write(0)
+    sph_file.write(0)
+    zsn_file.close()
+    ori_file.close()
+    sph_file.close()
+
+    # ∆ Variational terms
+    print("\t" * depth + "+= Setup Variables")
+    mx = Function(Mxs)
+    v, q = ufl.TestFunctions(Mxs)
+    u, p = ufl.split(mx)
+
+    # ∆ Fibre orientation push
+    Push = ufl.as_matrix([
         [ufl.cos(azi), -ufl.sin(azi), 0],
         [ufl.sin(azi),  ufl.cos(azi), 0],
         [0,             0,            1]
-    ])
-    R_ele = ufl.as_matrix([
+    ]) * ufl.as_matrix([
         [1, 0, 0],
         [0, ufl.cos(ele), -ufl.sin(ele)],
         [0, ufl.sin(ele),  ufl.cos(ele)]
     ])
-    Push = R_azi * R_ele  
-
-    # += Variables
-    print("\t" * depth + "+= Setup Variables")
-    v, q = ufl.TestFunctions(Mxs)
-    mx = Function(Mxs)
-    u, p = ufl.split(mx)
-    i, j, k, l, a, b = ufl.indices(6)  
     u_nu = Push * u
 
-    # += Kinematics
+    # ∆ Kinematics Setup
+    i, j, k, l, a, b = ufl.indices(6)  
     I = ufl.Identity(DIM)  
     F = ufl.variable(I + ufl.grad(u_nu))
 
-    # += [UNDERFORMED] Covariant basis vectors 
+    # ∆ Metric tensors
+    # µ [UNDERFORMED] Covariant basis vectors 
     A1 = ufl.as_vector([
         ufl.cos(azi) * ufl.cos(ele),
         ufl.sin(azi) * ufl.cos(ele),
@@ -502,16 +319,14 @@ def fx_(tnm, file, r, pct, s, depth):
     ])
     A2 = ufl.as_vector([0.0, 1.0, 0.0])  
     A3 = ufl.as_vector([0.0, 0.0, 1.0])
-
-    # += [UNDERFORMED] Metric tensors
+    # µ [UNDERFORMED] Metric tensors
     G_v = ufl.as_tensor([
         [ufl.dot(A1, A1), ufl.dot(A1, A2), ufl.dot(A1, A3)],
         [ufl.dot(A2, A1), ufl.dot(A2, A2), ufl.dot(A2, A3)],
         [ufl.dot(A3, A1), ufl.dot(A3, A2), ufl.dot(A3, A3)]
     ]) 
     G_v_inv = ufl.inv(G_v)  
-
-    # += [DEFORMED] Metric covariant tensors
+    # µ [DEFORMED] Metric covariant tensors
     g_v = ufl.as_tensor([
         [ufl.dot(F * A1, F * A1), ufl.dot(F * A1, F * A2), ufl.dot(F * A1, F * A3)],
         [ufl.dot(F * A2, F * A1), ufl.dot(F * A2, F * A2), ufl.dot(F * A2, F * A3)],
@@ -519,101 +334,63 @@ def fx_(tnm, file, r, pct, s, depth):
     ])
     g_v_inv = ufl.inv(g_v)
 
-    # += Christoffel symbols 
+    # ∆ Christoffel symbols 
     Gamma = ufl.as_tensor(
         0.5 * G_v_inv[k, l] * (ufl.grad(G_v[j, l])[i] + ufl.grad(G_v[i, l])[j] - ufl.grad(G_v[i, j])[l]),
         (i, j, k)
     )
 
-    # += Covariant derivative
+    # ∆ Covariant derivative
     covDev = ufl.as_tensor(ufl.grad(v)[i, j] + Gamma[i, k, j] * v[k], (i, j))
 
-    # += Kinematics 
+    # ∆ Kinematics Tensors
     C = ufl.variable(F.T * F)  
     B = ufl.variable(F * F.T)  
     E = ufl.as_tensor(0.5 * (g_v - G_v))   
-    J = ufl.det(F) 
+    J = ufl.det(F)   
 
-    # Q = (
-    #     CONSTIT_MYO[1] * E[0,0]**2 + 
-    #     CONSTIT_MYO[2] * (E[1,1]**2 + E[2,2]**2 + 2*(E[1,2] + E[2,1])) + 
-    #     CONSTIT_MYO[3] * (2*E[0,1]*E[1,0] + 2*E[0,2]*E[2,0])
-    # )
-    # s_piola = CONSTIT_MYO[0]/4 * ufl.exp(Q) * ufl.as_matrix([
-    #     [4*CONSTIT_MYO[1]*E[0,0], 2*CONSTIT_MYO[3]*(E[1,0] + E[0,1]), 2*CONSTIT_MYO[3]*(E[2,0] + E[0,2])],
-    #     [2*CONSTIT_MYO[3]*(E[0,1] + E[1,0]), 4*CONSTIT_MYO[2]*E[1,1], 2*CONSTIT_MYO[2]*(E[2,1] + E[1,2])],
-    #     [2*CONSTIT_MYO[3]*(E[0,2] + E[2,0]), 2*CONSTIT_MYO[2]*(E[1,2] + E[2,1]), 4*CONSTIT_MYO[3]*E[2,2]],
-    # ]) - p * ufl.inv(G_v)
-    # f_piola = F * s_piola #- p * ufl.inv(G_v) * J * ufl.inv(F).T            
-
-    # += Basis for Cauchy
+    # ∆ Constitutive setup
     e1 = ufl.as_tensor([[
         ufl.cos(azi) * ufl.cos(ele),
         ufl.sin(azi) * ufl.cos(ele),
         ufl.sin(ele)
-    ]]) #ufl.as_tensor([[1.0, 0.0, 0.0]])
-    # e2 = ufl.as_tensor([[0.0, 1.0, 0.0]]) 
+    ]])
     I4e1 = ufl.inner(e1 * C, e1)
-    # I4e2 = ufl.inner(e2 * C, e2)
-    # I8e1e2 = ufl.inner(e1 * C, e2)  
-
-    # += Stretch condition
-    reg = 1e-6  
     cond = lambda a: ufl.conditional(a > 1, a, 0)
 
-    # # # += Stress
-    # # sig = (
-    # #     HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
-    # #     2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0]) +
-    # #     2 * HLZ_CONS[4] * cond(I4e2 - 1) * (ufl.exp(HLZ_CONS[5] * cond(I4e2 - 1) ** 2) - 1) * ufl.outer(e2[0], e2[0]) +
-    # #     HLZ_CONS[6] * I8e1e2 * ufl.exp(HLZ_CONS[7] * (I8e1e2**2)) * (ufl.outer(e1[0], e2[0]) + ufl.outer(e2[0], e1[0]))
-    # # )
-
-    Psi = (
-        HLZ_CONS[0]/(2*HLZ_CONS[1]) * (ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) - 1) + 
-        HLZ_CONS[2]/(2*HLZ_CONS[3]) * (ufl.exp(HLZ_CONS[3] * (cond(I4e1 - 1) ** 2)) - 1)
+    # ∆ Sigma
+    sig = (
+        HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
+        2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0])
     )
 
-    # sig = (
-    #     HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
-    #     2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0])
-    # )
+    # ∆ Second Piola-Kirchoff with Pressure term
+    s_piola = J * ufl.inv(F) * sig * ufl.inv(F.T) + J * ufl.inv(F) * p * ufl.inv(G_v) * ufl.inv(F.T)
 
-    # s_piola = J * ufl.inv(F) * sig * ufl.inv(F.T) - p * ufl.inv(G_v) * J * ufl.inv(F.T)
-    # P = J * df.diff(psi, F_e) * df.inv(F_a.T) + self.p * df.det(
-    #         F
-    #     ) * df.inv(F.T)
-    # s_piola = J * ufl.inv(F) * sig * ufl.inv(F.T) - p * ufl.inv(G_v + 2 * E)
-    s_piola = J * ufl.inv(F) * ufl.diff(Psi, F) * ufl.inv(F.T) + J * ufl.inv(F) * p * ufl.inv(G_v) * ufl.inv(F.T)
-    
-    # piola = J * sig * ufl.inv(F.T) + p * ufl.inv(G_v) * J * ufl.inv(F.T)
-
-    # += Residual and Solver
+    # ∆ Residual
     print("\t" * depth + "+= Setup Solver and Residual")
     dx = ufl.Measure(integral_type="dx", domain=domain, metadata={"quadrature_degree": QUADRATURE})
     R = ufl.as_tensor(s_piola[a, b] * F[j, b] * covDev[j, a]) * dx + q * (J - 1) * dx
 
     log.set_log_level(log.LogLevel.INFO)
 
-    # += Data functions for exporting with setup
+    # ∆ Data sttore
     print("\t" * depth + "+= Setup Export Functions for Data Storage")
     dis = Function(V) 
     sig = Function(Tes)
     eps = Function(Tes)
-    # += Label Functions
     dis.name = "U - Displacement"
     eps.name = "E - Green Strain"
     sig.name = "S - Cauchy Stress"
-    # += File setup
     file = os.path.dirname(os.path.abspath(__file__)) + "/_bp/"
     dis_file = io.VTXWriter(MPI.COMM_WORLD, file + "/DISP/_" + tnm + "_" + str(r) + "_" + str(pct) + ".bp", dis, engine="BP4")
-    ori_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_ANG/_" + tnm + "_" + str(r) + "_" + str(pct) + ".bp", ori, engine="BP4")
-    sph_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_SPH/_" + tnm + "_" + str(r) + "_" + str(pct) + ".bp", ang, engine="BP4")
     sig_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_SIG/_" + tnm + "_" + str(r) + "_" + str(pct) + ".bp", sig, engine="BP4")
     eps_file = io.VTXWriter(MPI.COMM_WORLD, file + "/_EPS/_" + tnm + "_" + str(r) + "_" + str(pct) + ".bp", eps, engine="BP4")
 
-    tgs_x0 = ft.find(n_tg[2][np.where(np.array(l_tg[2]) == "Surface_x0")[0][0]])
-    tgs_x1 = ft.find(n_tg[2][np.where(np.array(l_tg[2]) == "Surface_x1")[0][0]])
+    # ∆ Setup boundary terms
+    print("\t" * depth + "+= Boundary Conditions")
+    tgs_x0 = ft.find(1110)
+    tgs_x1 = ft.find(1112)
     xx0 = locate_dofs_topological(Mxs.sub(0).sub(X), domain.topology.dim - 1, tgs_x0)
     xx1 = locate_dofs_topological(Mxs.sub(0).sub(X), domain.topology.dim - 1, tgs_x1)
     yx0 = locate_dofs_topological(Mxs.sub(0).sub(Y), domain.topology.dim - 1, tgs_x0)
@@ -621,11 +398,11 @@ def fx_(tnm, file, r, pct, s, depth):
     zx0 = locate_dofs_topological(Mxs.sub(0).sub(Z), domain.topology.dim - 1, tgs_x0)
     zx1 = locate_dofs_topological(Mxs.sub(0).sub(Z), domain.topology.dim - 1, tgs_x1)
 
-    # += Shape iteration
+    # ∆ Iterate strain
     for k in range(0, pct+1, 1):
 
+        # ∆ Apply displacement
         du = CUBE["x"] * PXLS["x"] * (k / 100)
-        
         if s:
             d_xx0 = dirichletbc(Constant(domain, default_scalar_type(-du//2)), xx0, Mxs.sub(0).sub(X))
             d_xx1 = dirichletbc(Constant(domain, default_scalar_type(du//2)), xx1, Mxs.sub(0).sub(X))
@@ -638,7 +415,7 @@ def fx_(tnm, file, r, pct, s, depth):
         d_zx1 = dirichletbc(Constant(domain, default_scalar_type(0)), zx1, Mxs.sub(0).sub(Z))
         bc = [d_xx0, d_yx0, d_zx0, d_xx1, d_yx1, d_zx1]
 
-        # += Nonlinear Solver
+        # ∆ Solver
         print("\t" * depth + "+= Solve ...")
         problem = NonlinearProblem(R, mx, bc)
         solver = NewtonSolver(domain.comm, problem)
@@ -646,36 +423,36 @@ def fx_(tnm, file, r, pct, s, depth):
         solver.rtol = TOL
         solver.convergence_criterion = "incremental"
 
-        # +==+==+
-        # Solution and Output
-        # += Solve
+        # ∆ Solve
         num_its, _ = solver.solve(mx)
         print("\t" * depth + " ... converged in {} its".format(num_its))
         
-        # += Evaluate values
+        # ∆ Evaluation
         print("\t" * depth + "+= Evaluate Tensors")
         u_eval = mx.sub(0).collapse()
         p_eval = mx.sub(1).collapse()
         dis.interpolate(u_eval)
-        # += Setup tensor space for stress tensor interpolation
+        # µ Evaluate stress
         cauchy = Expression(
             e=cauchy_tensor(u_eval, p_eval, x, azi, ele, depth), 
             X=Tes.element.interpolation_points()
         )
-        epsilon = Expression(
+        # µ Evaluate strain
+        green = Expression(
             e=green_tensor(u_eval, depth), 
             X=Tes.element.interpolation_points()
         )
         sig.interpolate(cauchy)
-        eps.interpolate(epsilon)
-        # += Reposition tensors for output
+        eps.interpolate(green)
+       
+        # ∆ Format for saving
         n_comps = 9
         sig_arr, eps_arr = sig.x.array, eps.x.array
         n_nodes = len(sig_arr) // n_comps
         r_sig = sig_arr.reshape((n_nodes, n_comps))
         r_eps = eps_arr.reshape((n_nodes, n_comps))
 
-        # += Coordinates
+        # ∆ Store data
         coords = np.array(x_n.function_space.tabulate_dof_coordinates()[:])
         df = pd.DataFrame(
             data={
@@ -688,26 +465,20 @@ def fx_(tnm, file, r, pct, s, depth):
             }
         )
 
-        # Save CSV
+        # ∆ Save CSV
         if s:
             csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_csv", f"{tnm}_{int(r)}_{k}_stretch.csv")
         else:
             csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_csv", f"{tnm}_{int(r)}_{k}.csv")
         df.to_csv(csv_path)  
 
-        # += Finish
-        print("\t" * depth + "+= Close and End")
-        # += Write files
+        # ∆ Write files
         dis_file.write(k)
         sig_file.write(k)
         eps_file.write(k)
 
-    ori_file.write(0)
-    sph_file.write(0)
-    # += Close files
+    # ∆ Close files
     dis_file.close()
-    ori_file.close()
-    sph_file.close()
     sig_file.close()
     eps_file.close()
 
@@ -715,18 +486,21 @@ def fx_(tnm, file, r, pct, s, depth):
 
 def main(args):
     depth = 1
-
     print("\t" * depth + "!! BEGIN FE !!")
+
+    # ∆ Tests
     if args.all_test == 0:
         emfs = [args.test_num]
     elif args.all_test == 1:
         emfs = [x for x in [str(y) for y in range(0, 36, 1)]]
 
+    # ∆ Iterate tests and simulate
     for emf in emfs:
         print("\t" * depth + " ~> Test: {}".format(emf))
         file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_msh/EMGEO_" + str(args.ref_level) + ".msh")
         fx_(emf, file, args.ref_level, args.def_level, args.stretch_test, depth)
 
+    # ∆ Plot
     plot_(args.test_num, args.ref_level, args.stretch_test, depth)
 
 if __name__ == '__main__':
@@ -747,5 +521,5 @@ if __name__ == '__main__':
             self.def_level = p
             self.stretch_test = s
             self.depth = depth
-    vals = args("test", 0, 1000, 20, 1, 1)
+    vals = args("test", 0, 1000, 20, 0, 1)
     main(vals)
