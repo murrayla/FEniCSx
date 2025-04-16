@@ -15,6 +15,7 @@ import pandas as pd
 import seaborn as sns
 import multiprocessing
 import scipy.optimize as opt
+from functools import partial
 import matplotlib.pyplot as plt
 from scipy.optimize import differential_evolution
 
@@ -23,7 +24,7 @@ import ufl
 from mpi4py import MPI
 from basix.ufl import element, mixed_element
 from dolfinx import log, io,  default_scalar_type
-from dolfinx.fem import Function, functionspace, dirichletbc, locate_dofs_topological, locate_dofs_geometrical, Expression, element, Constant
+from dolfinx.fem import Function, functionspace, dirichletbc, locate_dofs_topological, locate_dofs_geometrical, Expression, Constant
 from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
 
@@ -193,16 +194,14 @@ def run_simulation(HLZ_CONS, r, pct, s, tnm, env):
 
     # ∆ Iterate strain
     sig_xx_mean = []
+    sig = Function(Tes)
+    inx, iny, inz = 0.05 * EDGE[0], 0.05 * EDGE[1], 0.05 * EDGE[2]
     for k in [0, 5, 10, 15, 20]:
 
         # ∆ Apply displacement
         du = CUBE["x"] * PXLS["x"] * (k / 100)
-        if s:
-            d_xx0 = dirichletbc(Constant(domain, default_scalar_type(-du//2)), xx0, Mxs.sub(0).sub(X))
-            d_xx1 = dirichletbc(Constant(domain, default_scalar_type(du//2)), xx1, Mxs.sub(0).sub(X))
-        else:
-            d_xx0 = dirichletbc(Constant(domain, default_scalar_type(du//2)), xx0, Mxs.sub(0).sub(X))
-            d_xx1 = dirichletbc(Constant(domain, default_scalar_type(-du//2)), xx1, Mxs.sub(0).sub(X))
+        d_xx0 = dirichletbc(Constant(domain, default_scalar_type(-du//2)), xx0, Mxs.sub(0).sub(X))
+        d_xx1 = dirichletbc(Constant(domain, default_scalar_type(du//2)), xx1, Mxs.sub(0).sub(X))
         d_yx0 = dirichletbc(Constant(domain, default_scalar_type(0)), yx0, Mxs.sub(0).sub(Y))
         d_yx1 = dirichletbc(Constant(domain, default_scalar_type(0)), yx1, Mxs.sub(0).sub(Y))
         d_zx0 = dirichletbc(Constant(domain, default_scalar_type(0)), zx0, Mxs.sub(0).sub(Z))
@@ -218,8 +217,11 @@ def run_simulation(HLZ_CONS, r, pct, s, tnm, env):
         solver.convergence_criterion = "incremental"
 
         # ∆ Solve
-        num_its, _ = solver.solve(mx)
-        print("\t" * depth + " ... converged in {} its".format(num_its))
+        try:
+            num_its, _ = solver.solve(mx)
+            print("\t" * depth + " ... converged in {} its".format(num_its))
+        except:
+            return None
         
         # ∆ Evaluation
         print("\t" * depth + "+= Evaluate Tensors")
@@ -247,34 +249,40 @@ def run_simulation(HLZ_CONS, r, pct, s, tnm, env):
                 "sig_xy": r_sig[:, 1], "sig_xz": r_sig[:, 2], "sig_yz": r_sig[:, 5]
             }
         )
+        df = df[(
+            (df["X"] >= inx) & (df["X"] <= EDGE[0] - inx) & 
+            (df["Y"] >= iny) & (df["Y"] <= EDGE[1] - iny) & 
+            (df["Z"] >= inz) & (df["Z"] <= EDGE[2] - inz) 
+        )]
 
         # ∆ Retain mean value
         sig_xx_mean.append(df.loc[:, 'sig_xx'].mean())
 
     # ∆ Update text files on progress 
-    # µ Mean data
-    f = open(f"m_{r}_.txt", "a")
-    for x in sig_xx_mean:
-        f.write(str(x)  +  "  ")
-    f.close()
-    # µ Constitutive datas
-    f = open(f"c_{r}_.txt", "a")
-    f.write(str(HLZ_CONS) + "  ")
-    f.close()
+    if sig_xx_mean[-1] < 4:
+        # µ Mean data
+        with open(f"opti_s.txt", "a") as f:
+            for x in sig_xx_mean:
+                f.write(str(x)  +  "  ")
+            f.write("\n")
+            f.close()
+        # µ Constitutive datas
+        with open(f"opti_c.txt", "a") as f:
+            for x in HLZ_CONS:
+                f.write(str(x)  +  "  ")
+            f.write("\n")
+            f.close()
 
     return sig_xx_mean
 
 # ∆ Error calculation
-def error_function(HLZ_CONS, strain_exp, stress_exp, r, pct, s, tnm, env):
+def error_function(HLZ_CONS, _, stress_exp, r, pct, s, tnm, env):
 
     sig_sim = run_simulation(HLZ_CONS, r, pct, s, tnm, env)
     if sig_sim is None:
         return 1e10
 
-    eps_sim = np.linspace(0, pct / 100, len(sig_sim))
-    interp = np.interp(strain_exp, eps_sim, sig_sim)
-
-    mse = np.mean((interp - stress_exp) ** 2)
+    mse = np.mean((sig_sim - stress_exp) ** 2)
     return mse
 
 # ∆ Simulation environment
@@ -325,13 +333,13 @@ if __name__ == '__main__':
         bounds=bounds,
         args=(eps_exp, sig_exp, r, pct, s, tnm, env),
         strategy='best1bin',
-        maxiter=50,
+        maxiter=100,
         popsize=15,
         tol=1e-6,
         mutation=(0.5, 1),
         recombination=0.7,
-        seed=42,
-        workers=-1, 
+        seed=17081993,
+        workers=1, 
         updating='deferred',
         polish=True,
         callback=my_callback

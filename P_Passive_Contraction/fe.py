@@ -13,6 +13,7 @@ import random
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 
 # ∆ Dolfin
@@ -118,7 +119,7 @@ def plot_(n, r, s, depth):
     stretch(n, r, depth)
 
 # ∆ Cauchy
-def cauchy_tensor(u, p, x, azi, ele, depth):
+def cauchy_tensor(u, p, x, azi, ele, hlz, depth):
     depth += 1
     print("\t" * depth + "~> Calculate the values of cauchy stress tensor")
     
@@ -136,8 +137,8 @@ def cauchy_tensor(u, p, x, azi, ele, depth):
 
     # ∆ Cauchy
     sig = (
-        HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
-        2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(ff[0], ff[0])
+        hlz[0] * ufl.exp(hlz[1] * (ufl.tr(C) - 3)) * B +
+        2 * hlz[2] * cond(I4e1 - 1) * (ufl.exp(hlz[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(ff[0], ff[0])
     )
 
     return sig
@@ -225,7 +226,7 @@ def anistropic(tnm, msh_ref, azi_vals, ele_vals, x_n, zs_nodes, depth):
     return azi_vals, ele_vals, zs_nodes
 
 # ∆ Simulation
-def fx_(tnm, file, r, pct, s, depth):
+def fx_(tnm, file, r, pct, s, hlz, depth):
     depth += 1
     print("\t" * depth + "+= Begin FE")
 
@@ -360,8 +361,8 @@ def fx_(tnm, file, r, pct, s, depth):
 
     # ∆ Sigma
     sig = (
-        HLZ_CONS[0] * ufl.exp(HLZ_CONS[1] * (ufl.tr(C) - 3)) * B +
-        2 * HLZ_CONS[2] * cond(I4e1 - 1) * (ufl.exp(HLZ_CONS[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0])
+        hlz[0] * ufl.exp(hlz[1] * (ufl.tr(C) - 3)) * B +
+        2 * hlz[2] * cond(I4e1 - 1) * (ufl.exp(hlz[3] * cond(I4e1 - 1) ** 2) - 1) * ufl.outer(e1[0], e1[0])
     )
 
     # ∆ Second Piola-Kirchoff with Pressure term
@@ -399,10 +400,13 @@ def fx_(tnm, file, r, pct, s, depth):
     zx1 = locate_dofs_topological(Mxs.sub(0).sub(Z), domain.topology.dim - 1, tgs_x1)
 
     # ∆ Iterate strain
+    df_dict = []
+    strains = []
     for k in range(0, pct+1, 1):
 
         # ∆ Apply displacement
         du = CUBE["x"] * PXLS["x"] * (k / 100)
+        strains.append(k)
         if s:
             d_xx0 = dirichletbc(Constant(domain, default_scalar_type(-du//2)), xx0, Mxs.sub(0).sub(X))
             d_xx1 = dirichletbc(Constant(domain, default_scalar_type(du//2)), xx1, Mxs.sub(0).sub(X))
@@ -434,7 +438,7 @@ def fx_(tnm, file, r, pct, s, depth):
         dis.interpolate(u_eval)
         # µ Evaluate stress
         cauchy = Expression(
-            e=cauchy_tensor(u_eval, p_eval, x, azi, ele, depth), 
+            e=cauchy_tensor(u_eval, p_eval, x, azi, ele, hlz, depth), 
             X=Tes.element.interpolation_points()
         )
         # µ Evaluate strain
@@ -471,6 +475,7 @@ def fx_(tnm, file, r, pct, s, depth):
         else:
             csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_csv", f"{tnm}_{int(r)}_{k}.csv")
         df.to_csv(csv_path)  
+        df_dict.append(df)
 
         # ∆ Write files
         dis_file.write(k)
@@ -482,7 +487,7 @@ def fx_(tnm, file, r, pct, s, depth):
     sig_file.close()
     eps_file.close()
 
-    return num_its
+    return num_its, df_dict, strains 
 
 # ∆ Main
 def main(args):
@@ -495,14 +500,110 @@ def main(args):
     elif args.all_test == 1:
         emfs = [x for x in [str(y) for y in range(0, 36, 1)]]
 
-    # ∆ Iterate tests and simulate
+    # ∆ Load constitutive values
+    hlz_df = pd.read_csv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "HLZ_CONS.csv"))
+
+    # ∆ Figure setup
+    fig, ax = plt.subplots(figsize=(12, 10))
+    ax.set_title("Normal Stress in X Direction [σ] - Stretch")
+    ax.set_xlabel("Strain, ΔL/L [%]")
+    ax.set_ylabel("Cauchy Stress [kPa]")
+
+    # ∆ Iterate tests 
+    n = len(hlz_df["a"])  # number of iterations
+    colors = cm.viridis(np.linspace(0, 1, n)) 
     for emf in emfs:
         print("\t" * depth + " ~> Test: {}".format(emf))
-        file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_msh/EMGEO_" + str(args.ref_level) + ".msh")
-        fx_(emf, file, args.ref_level, args.def_level, args.stretch_test, depth)
 
-    # ∆ Plot
-    plot_(args.test_num, args.ref_level, args.stretch_test, depth)
+        # ∆ Iterate constitutive values
+        for k, row in hlz_df.iterrows():
+
+            if k > 1: break
+
+            color = colors[k]
+
+            # ∆ Run simulation
+            hlz = [row["a"], row["b"], row["af"], row["bf"]]
+            file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_msh/EMGEO_" + str(args.ref_level) + ".msh")
+            _, df_dict, strains = fx_(emf, file, args.ref_level, args.def_level, args.stretch_test, hlz, depth)
+            sv_nm = emf + "_" + str(k)
+            data_l = []
+
+            # ∆ Iterate dataframes 
+            for e, df in zip(strains, df_dict):
+
+                # ∆ Filter
+                f_df = df[(
+                    (df["X"] >= 50) & (df["X"] <= EDGE[0] - 50) & 
+                    (df["Y"] >= 50) & (df["Y"] <= EDGE[1] - 50) & 
+                    (df["Z"] >= 50) & (df["Z"] <= EDGE[2] - 50) 
+                )].copy()
+                
+                # ∆ Sample
+                s_df = f_df.sample(n=len(f_df), random_state=42)
+                
+                # ∆ Append data
+                for _, row in s_df.iterrows():
+                    data_l.append([e, "σ_xx", row["sig_xx"]])
+
+            # ∆ New dataframe
+            plot_df = pd.DataFrame(data_l, columns=["Strain", "Stress Type", "Stress"])
+
+            # ∆ Create mean data for plotting
+            sum_df = plot_df.groupby(["Strain", "Stress Type"]).agg(
+                mean_stress=("Stress", "mean"),
+                std_stress=("Stress", "std")
+            ).reset_index()
+
+            # ∆ Extract s_xx
+            sig_xx_df = sum_df[sum_df["Stress Type"] == "σ_xx"]
+
+            # ∆ Plot simulation
+            ax.plot(sig_xx_df["Strain"], sig_xx_df["mean_stress"], marker="o", label=("HLZ_"+str(k)), color=color)
+            ax.fill_between(
+                sig_xx_df["Strain"],
+                sig_xx_df["mean_stress"] - sig_xx_df["std_stress"],
+                sig_xx_df["mean_stress"] + sig_xx_df["std_stress"],
+                alpha=0.3,
+                color=color
+            )
+
+    # ∆ Plot experimental from Li.
+    exp_strain = [0, 5, 10, 15, 20]
+    exp_stress = [0, 0.3857, 1.1048, 1.8023, 2.6942] 
+    exp_sem = [0, 0.0715, 0.2257, 0.3251, 0.3999]   
+    ax.errorbar(
+        exp_strain, exp_stress, yerr=exp_sem, fmt="--o", mfc='red', mec='red', 
+        ecolor='red', label="Li et al. (2023)", color="tab:red"
+    )
+
+    # ∆ Plot experimental from Caporizzo.
+    exp_strain = [0, 2.5, 5, 7.5, 10, 11]
+    exp_stress = [0, 0.24, 0.375, 0.625, 1.1, 1.27] 
+    ax.plot(exp_strain, exp_stress, "--g", marker="o", label="Caporizzo et al. (2018)")
+
+    # ∆ Plot experimental from King
+    exp_strain = [
+        ((x-1.84)/1.84)*100 for x in np.array(
+            [1.84, 1.85, 1.9, 1.95, 2, 2.05, 2.10]
+        )
+    ]
+    exp_stress = np.array([0, 0.2, 0.95, 1.7, 2.55, 3.4, 4.2])
+    up_err = np.array([0, 0.55-0.2, 1.25-0.95, 2.1-1.7, 3.1-2.55, 0.8, 1.4])
+    lw_err = np.zeros_like(up_err)
+
+    ax.errorbar(
+        exp_strain, exp_stress, yerr=np.array([lw_err, up_err]), fmt='--o',
+        mfc='black', mec='black', ecolor='black', color="tab:black", capsize=4, label="King et al. (2010)"
+    )
+
+    ax.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.dirname(os.path.abspath(__file__)) + "/_png/" + "HLZ_sig_xx.png")
+    plt.close()
+
+    # # ∆ Plot
+    # plot_(args.test_num, args.ref_level, args.stretch_test, depth)
 
 # ∆ Inititate 
 if __name__ == '__main__':

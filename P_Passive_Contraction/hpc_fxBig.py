@@ -295,7 +295,7 @@ def fx_(tnm, file, r, pct, s, depth):
     ori_arr[:, 2] = np.sin(ele.x.array) 
     ori.x.array[:] = ori_arr.reshape(-1)
     v_x = np.array([1.0, 0.0, 0.0])
-    ang_vals = np.arccos(np.clip(np.dot(ori_arr, v_x), -1.0, 1.0))
+    ang_vals = np.rad2deg(np.arccos(np.clip(np.dot(ori_arr, v_x), -1.0, 1.0)))
     ang.x.array[:] = ang_vals.reshape(-1)
 
 
